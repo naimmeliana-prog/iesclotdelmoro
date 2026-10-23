@@ -1,19 +1,25 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { COURSE_METADATA } from '../data/clotDelMoroData';
+import {
+  ADHD_STUDY_PROTOCOLS,
+  COURSE_MIND_MAP_TEMPLATES,
+  FEYNMAN_GUIDED_CHALLENGES,
+} from '../data/expandedStudyContent';
 import { CornellNote, CourseGrade, FlashcardItem, MindMapNode } from '../types';
 import { soundFX } from '../utils/sound';
 import {
   AlertCircle,
+  BookOpen,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
+  Circle,
+  Grid,
   Lightbulb,
   Mic,
-  MicOff,
   Pause,
   Play,
   Plus,
-  Radio,
   RotateCcw,
   Sparkles,
   Square,
@@ -32,7 +38,7 @@ interface StudyStudioProps {
   onCompleteFocusBlock: (minutes: number, studyPointsEarned: number, breakEarned: number) => void;
 }
 
-type TechniqueMode = 'FLASHCARDS' | 'MINDMAP' | 'CORNELL' | 'FEYNMAN';
+type TechniqueMode = 'FLASHCARDS' | 'MINDMAP' | 'CORNELL' | 'FEYNMAN' | 'PROTOCOLS';
 
 export const StudyStudio: React.FC<StudyStudioProps> = ({
   selectedCourse,
@@ -99,17 +105,35 @@ export const StudyStudio: React.FC<StudyStudioProps> = ({
 
   // --- FLASHCARDS STATE ---
   const courseCards = flashcards.filter((c) => c.course === selectedCourse);
-  const activeDeck = courseCards.length > 0 ? courseCards : flashcards;
+  const allCourseCards = courseCards.length > 0 ? courseCards : flashcards;
+
+  const uniqueCardSubjects = Array.from(new Set(allCourseCards.map((c) => c.subject)));
+  const [selectedFlashcardSubject, setSelectedFlashcardSubject] = useState<string>('ALL');
+  const [showFlashcardCatalogGrid, setShowFlashcardCatalogGrid] = useState<boolean>(false);
+
+  useEffect(() => {
+    setSelectedFlashcardSubject('ALL');
+    setCardIndex(0);
+    setShowAnswer(false);
+  }, [selectedCourse]);
+
+  const activeDeck =
+    selectedFlashcardSubject === 'ALL'
+      ? allCourseCards
+      : allCourseCards.filter((c) => c.subject === selectedFlashcardSubject);
+
   const [cardIndex, setCardIndex] = useState<number>(0);
   const [showAnswer, setShowAnswer] = useState<boolean>(false);
   const [showNewCardForm, setShowNewCardForm] = useState<boolean>(false);
-  const [newCardSubject, setNewCardSubject] = useState<string>('Biología y Geología');
+  const [newCardSubject, setNewCardSubject] = useState<string>(
+    uniqueCardSubjects[0] || 'Biología y Geología'
+  );
   const [newCardQuestion, setNewCardQuestion] = useState<string>('');
   const [newCardAnswer, setNewCardAnswer] = useState<string>('');
   const [newCardHint, setNewCardHint] = useState<string>('');
 
   const safeCardIndex = activeDeck.length > 0 ? cardIndex % activeDeck.length : 0;
-  const currentCard = activeDeck[safeCardIndex];
+  const currentCard = activeDeck[safeCardIndex] || allCourseCards[0];
 
   // --- AUDIO & MICROPHONE RECORDING (ACTIVE RECALL & VOCAL REHEARSAL) ---
   interface CardAudioRecord {
@@ -457,36 +481,41 @@ export const StudyStudio: React.FC<StudyStudioProps> = ({
     soundFX.playStepComplete();
   };
 
-  // --- MIND MAP STATE ---
-  const [centralTopic, setCentralTopic] = useState<string>('La Célula Eucariota (1º ESO)');
-  const [mindNodes, setMindNodes] = useState<MindMapNode[]>([
-    {
-      id: 'mm-1',
-      label: 'Membrana Plasmática',
-      category: 'RAMA',
-      notes: 'Regula qué sustancias entran y salen',
-    },
-    {
-      id: 'mm-2',
-      label: 'Núcleo Celular',
-      category: 'RAMA',
-      notes: 'Protege el ADN (Material Genético)',
-    },
-    {
-      id: 'mm-3',
-      label: 'Mitocondrias',
-      category: 'RAMA',
-      notes: 'Producen energía mediante respiración celular',
-    },
-    {
-      id: 'mm-4',
-      label: 'Cloroplastos (Vegetal)',
-      category: 'DETALLE',
-      notes: 'Realizan la fotosíntesis con luz solar',
-    },
-  ]);
+  // --- MIND MAP STATE WITH COURSE TEMPLATES ---
+  const courseMindMapTemplates = COURSE_MIND_MAP_TEMPLATES.filter(
+    (t) => t.course === selectedCourse
+  );
+  const availableMindTemplates =
+    courseMindMapTemplates.length > 0 ? courseMindMapTemplates : COURSE_MIND_MAP_TEMPLATES;
+
+  const [selectedMindTemplateId, setSelectedMindTemplateId] = useState<string>(
+    availableMindTemplates[0].id
+  );
+  const [centralTopic, setCentralTopic] = useState<string>(
+    availableMindTemplates[0].centralTopic
+  );
+  const [mindNodes, setMindNodes] = useState<MindMapNode[]>(availableMindTemplates[0].nodes);
   const [newNodeLabel, setNewNodeLabel] = useState<string>('');
   const [newNodeNotes, setNewNodeNotes] = useState<string>('');
+
+  useEffect(() => {
+    const templatesForNewCourse = COURSE_MIND_MAP_TEMPLATES.filter(
+      (t) => t.course === selectedCourse
+    );
+    const firstTmpl = templatesForNewCourse[0] || COURSE_MIND_MAP_TEMPLATES[0];
+    setSelectedMindTemplateId(firstTmpl.id);
+    setCentralTopic(firstTmpl.centralTopic);
+    setMindNodes(firstTmpl.nodes);
+  }, [selectedCourse]);
+
+  const handleSelectMindTemplate = (tmplId: string) => {
+    const found = COURSE_MIND_MAP_TEMPLATES.find((t) => t.id === tmplId);
+    if (!found) return;
+    setSelectedMindTemplateId(found.id);
+    setCentralTopic(found.centralTopic);
+    setMindNodes(found.nodes);
+    soundFX.playStepComplete();
+  };
 
   const handleAddMindNode = (e: React.FormEvent) => {
     e.preventDefault();
@@ -511,6 +540,12 @@ export const StudyStudio: React.FC<StudyStudioProps> = ({
   const [cornellCuesText, setCornellCuesText] = useState<string>('');
   const [cornellBodyText, setCornellBodyText] = useState<string>('');
   const [cornellSummaryText, setCornellSummaryText] = useState<string>('');
+  const [showAllCoursesCornell, setShowAllCoursesCornell] = useState<boolean>(false);
+  const [showCornellForm, setShowCornellForm] = useState<boolean>(false);
+
+  const displayedCornellNotes = showAllCoursesCornell
+    ? cornellNotes
+    : cornellNotes.filter((n) => n.course === selectedCourse);
 
   const handleSaveCornell = (e: React.FormEvent) => {
     e.preventDefault();
@@ -530,18 +565,59 @@ export const StudyStudio: React.FC<StudyStudioProps> = ({
     setCornellCuesText('');
     setCornellBodyText('');
     setCornellSummaryText('');
+    setShowCornellForm(false);
     soundFX.playRewardUnlock();
   };
 
-  // --- FEYNMAN TECHNIQUE STATE ---
-  const [feynmanConcept, setFeynmanConcept] = useState<string>('Fracciones Equivalentes y m.c.m.');
+  // --- FEYNMAN TECHNIQUE STATE WITH GUIDED CHALLENGES ---
+  const courseFeynmanChallenges = FEYNMAN_GUIDED_CHALLENGES.filter(
+    (f) => f.course === selectedCourse
+  );
+  const availableFeynmanChallenges =
+    courseFeynmanChallenges.length > 0 ? courseFeynmanChallenges : FEYNMAN_GUIDED_CHALLENGES;
+
+  const [selectedFeynmanId, setSelectedFeynmanId] = useState<string>(
+    availableFeynmanChallenges[0].id
+  );
+  const [feynmanConcept, setFeynmanConcept] = useState<string>(
+    availableFeynmanChallenges[0].concept
+  );
   const [feynmanSimpleExplanation, setFeynmanSimpleExplanation] = useState<string>(
-    'Dos fracciones son equivalentes cuando representan el mismo trozo de pizza aunque esté cortada en más porciones.'
+    availableFeynmanChallenges[0].modelExplanation
   );
   const [feynmanAnalogy, setFeynmanAnalogy] = useState<string>(
-    'Es como cambiar 1 moneda de 2 euros por 4 monedas de 50 céntimos: tienes exactamente el mismo valor.'
+    availableFeynmanChallenges[0].modelAnalogy
+  );
+  const [feynmanKeyTerms, setFeynmanKeyTerms] = useState<string[]>(
+    availableFeynmanChallenges[0].keywordsToMention
   );
   const [feynmanVerified, setFeynmanVerified] = useState<boolean>(false);
+
+  useEffect(() => {
+    const list = FEYNMAN_GUIDED_CHALLENGES.filter((f) => f.course === selectedCourse);
+    const first = list[0] || FEYNMAN_GUIDED_CHALLENGES[0];
+    setSelectedFeynmanId(first.id);
+    setFeynmanConcept(first.concept);
+    setFeynmanSimpleExplanation(first.modelExplanation);
+    setFeynmanAnalogy(first.modelAnalogy);
+    setFeynmanKeyTerms(first.keywordsToMention);
+    setFeynmanVerified(false);
+  }, [selectedCourse]);
+
+  const handleSelectFeynmanChallenge = (challengeId: string) => {
+    const found = FEYNMAN_GUIDED_CHALLENGES.find((f) => f.id === challengeId);
+    if (!found) return;
+    setSelectedFeynmanId(found.id);
+    setFeynmanConcept(found.concept);
+    setFeynmanSimpleExplanation(found.modelExplanation);
+    setFeynmanAnalogy(found.modelAnalogy);
+    setFeynmanKeyTerms(found.keywordsToMention);
+    setFeynmanVerified(false);
+    soundFX.playStepComplete();
+  };
+
+  // --- ADHD STUDY PROTOCOLS INTERACTIVE CHECKLIST STATE ---
+  const [protocolCheckedSteps, setProtocolCheckedSteps] = useState<Record<string, boolean>>({});
 
   const formatTimer = (sec: number) => {
     const m = Math.floor(sec / 60);
@@ -675,14 +751,19 @@ export const StudyStudio: React.FC<StudyStudioProps> = ({
 
       {/* RIGHT ZONE (7 cols): Interactive Study Techniques */}
       <div className="lg:col-span-7 border border-stone-200 dark:border-stone-800 rounded-xl bg-white dark:bg-stone-900 p-6 space-y-6">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-4 border-b border-stone-200 dark:border-stone-800">
-          <div>
-            <p className="text-xs text-stone-500 dark:text-stone-400">
-              Aprendizaje Activo Multicanal · Adaptado a {courseMeta.label}
-            </p>
-            <h2 className="text-xl font-bold text-stone-900 dark:text-white mt-0.5">
-              Técnicas de Estudio Personalizadas TDAH
-            </h2>
+        <div className="flex flex-col gap-4 pb-4 border-b border-stone-200 dark:border-stone-800">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p className="text-xs text-stone-500 dark:text-stone-400">
+                Aprendizaje Activo Multicanal · Adaptado a {courseMeta.label}
+              </p>
+              <h2 className="text-xl font-bold text-stone-900 dark:text-white mt-0.5">
+                Estudio Activo y Herramientas TDAH
+              </h2>
+            </div>
+            <span className="text-xs font-mono text-amber-700 dark:text-amber-400 font-semibold">
+              {allCourseCards.length} Flashcards · {displayedCornellNotes.length} Fichas Cornell
+            </span>
           </div>
 
           <div className="flex flex-wrap items-center gap-1 p-1 bg-stone-100 dark:bg-stone-800 rounded-lg">
@@ -691,44 +772,55 @@ export const StudyStudio: React.FC<StudyStudioProps> = ({
               onClick={() => setTechniqueMode('FLASHCARDS')}
               className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 ${
                 techniqueMode === 'FLASHCARDS'
-                  ? 'bg-white dark:bg-stone-900 text-stone-900 dark:text-white shadow-xs'
+                  ? 'bg-white dark:bg-stone-900 text-stone-900 dark:text-white shadow-xs font-semibold'
                   : 'text-stone-600 dark:text-stone-300 hover:text-stone-900'
               }`}
             >
-              Flashcards
+              Flashcards ({allCourseCards.length})
             </button>
             <button
               type="button"
               onClick={() => setTechniqueMode('MINDMAP')}
               className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 ${
                 techniqueMode === 'MINDMAP'
-                  ? 'bg-white dark:bg-stone-900 text-stone-900 dark:text-white shadow-xs'
+                  ? 'bg-white dark:bg-stone-900 text-stone-900 dark:text-white shadow-xs font-semibold'
                   : 'text-stone-600 dark:text-stone-300 hover:text-stone-900'
               }`}
             >
-              Mapa Visual
+              Mapas Visuales ({availableMindTemplates.length})
             </button>
             <button
               type="button"
               onClick={() => setTechniqueMode('CORNELL')}
               className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 ${
                 techniqueMode === 'CORNELL'
-                  ? 'bg-white dark:bg-stone-900 text-stone-900 dark:text-white shadow-xs'
+                  ? 'bg-white dark:bg-stone-900 text-stone-900 dark:text-white shadow-xs font-semibold'
                   : 'text-stone-600 dark:text-stone-300 hover:text-stone-900'
               }`}
             >
-              Método Cornell
+              Método Cornell ({displayedCornellNotes.length})
             </button>
             <button
               type="button"
               onClick={() => setTechniqueMode('FEYNMAN')}
               className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 ${
                 techniqueMode === 'FEYNMAN'
-                  ? 'bg-white dark:bg-stone-900 text-stone-900 dark:text-white shadow-xs'
+                  ? 'bg-white dark:bg-stone-900 text-stone-900 dark:text-white shadow-xs font-semibold'
                   : 'text-stone-600 dark:text-stone-300 hover:text-stone-900'
               }`}
             >
-              Técnica Feynman
+              Retos Feynman ({availableFeynmanChallenges.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setTechniqueMode('PROTOCOLS')}
+              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 ${
+                techniqueMode === 'PROTOCOLS'
+                  ? 'bg-white dark:bg-stone-900 text-stone-900 dark:text-white shadow-xs font-semibold'
+                  : 'text-stone-600 dark:text-stone-300 hover:text-stone-900'
+              }`}
+            >
+              Planes de Examen ({ADHD_STUDY_PROTOCOLS.length})
             </button>
           </div>
         </div>
@@ -736,21 +828,65 @@ export const StudyStudio: React.FC<StudyStudioProps> = ({
         {/* TECHNIQUE 1: ACTIVE RECALL FLASHCARDS */}
         {techniqueMode === 'FLASHCARDS' && currentCard && (
           <div className="space-y-5">
-            <div className="flex items-center justify-between text-xs text-stone-500 dark:text-stone-400">
-              <span>
-                Asignatura: <strong className="text-stone-800 dark:text-stone-200">{currentCard.subject}</strong>
-                <span aria-hidden="true"> · </span>
-                Tarjeta <span className="font-mono tabular-nums">{safeCardIndex + 1}</span> de{' '}
-                <span className="font-mono tabular-nums">{activeDeck.length}</span>
-              </span>
-              <button
-                type="button"
-                onClick={() => setShowNewCardForm((prev) => !prev)}
-                className="flex items-center gap-1 text-amber-700 dark:text-amber-400 font-semibold hover:underline whitespace-nowrap shrink-0"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                {showNewCardForm ? 'Cerrar formulario' : 'Crear tarjeta propia'}
-              </button>
+            {/* Subject Filter Bar + Mode Switcher */}
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedFlashcardSubject('ALL');
+                    setCardIndex(0);
+                    setShowAnswer(false);
+                  }}
+                  className={`px-2.5 py-1 rounded-md text-xs font-semibold border transition-colors ${
+                    selectedFlashcardSubject === 'ALL'
+                      ? 'bg-amber-600 text-white border-amber-600'
+                      : 'bg-stone-50 dark:bg-stone-800 border-stone-200 dark:border-stone-700 text-stone-700 dark:text-stone-300'
+                  }`}
+                >
+                  Todas ({allCourseCards.length})
+                </button>
+                {uniqueCardSubjects.map((subjName) => {
+                  const count = allCourseCards.filter((c) => c.subject === subjName).length;
+                  return (
+                    <button
+                      key={subjName}
+                      type="button"
+                      onClick={() => {
+                        setSelectedFlashcardSubject(subjName);
+                        setCardIndex(0);
+                        setShowAnswer(false);
+                      }}
+                      className={`px-2.5 py-1 rounded-md text-xs font-medium border transition-colors ${
+                        selectedFlashcardSubject === subjName
+                          ? 'bg-amber-600 text-white border-amber-600 font-semibold'
+                          : 'bg-stone-50 dark:bg-stone-800 border-stone-200 dark:border-stone-700 text-stone-700 dark:text-stone-300'
+                      }`}
+                    >
+                      {subjName.split('(')[0].trim()} ({count})
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowFlashcardCatalogGrid((prev) => !prev)}
+                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-stone-300 dark:border-stone-700 text-xs font-semibold text-stone-700 dark:text-stone-200 hover:bg-stone-100 dark:hover:bg-stone-800"
+                >
+                  <Grid className="w-3.5 h-3.5" />
+                  <span>{showFlashcardCatalogGrid ? 'Modo Entrenador Oral' : 'Ver Catálogo Completo'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowNewCardForm((prev) => !prev)}
+                  className="flex items-center gap-1 text-xs text-amber-700 dark:text-amber-400 font-semibold hover:underline whitespace-nowrap shrink-0"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  {showNewCardForm ? 'Cerrar' : 'Nueva tarjeta'}
+                </button>
+              </div>
             </div>
 
             {showNewCardForm && (
@@ -799,238 +935,333 @@ export const StudyStudio: React.FC<StudyStudioProps> = ({
               </form>
             )}
 
-            {(() => {
-              const currentCardRecord = cardAudioRecords[currentCard.id];
-              return (
-                <div className="p-6 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50/70 dark:bg-stone-800/40 space-y-4">
-                  <div className="flex items-center justify-between text-xs text-stone-500 dark:text-stone-400">
-                    <span className="font-semibold">{showAnswer ? 'RESPUESTA EXPLICADA' : 'PREGUNTA DE AUTOEVALUACIÓN'}</span>
-                    <span>{currentCard.mastered ? '✓ Dominada' : '○ En repaso'}</span>
-                  </div>
-
-                  <h3 className="text-lg font-bold text-stone-900 dark:text-white leading-snug">
-                    {currentCard.question}
-                  </h3>
-
-                  {/* VOICE RECORDING & ACTIVE RECALL ZONE */}
-                  <div className="p-4 rounded-xl border border-amber-300 dark:border-amber-800/70 bg-amber-50/90 dark:bg-amber-950/30 space-y-3">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex items-start gap-2.5">
-                        <div className="p-2 rounded-lg bg-amber-500 text-stone-950 shrink-0 mt-0.5 shadow-xs">
-                          <Mic className="w-4 h-4" />
-                        </div>
-                        <div>
-                          <div className="flex flex-wrap items-center gap-2">
-                            <h4 className="text-xs font-bold text-stone-900 dark:text-stone-100">
-                              Respuesta en Voz Alta (Recuerdo Activo TDAH)
-                            </h4>
-                            {currentCardRecord?.awarded ? (
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700">
-                                <Sparkles className="w-3 h-3" />
-                                +15 PE Ganados
-                              </span>
-                            ) : (
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-200 dark:bg-amber-900/50 text-amber-900 dark:text-amber-200">
-                                +15 PE por ensayar oralmente
-                              </span>
-                            )}
-                          </div>
-                          <p className="text-xs text-stone-600 dark:text-stone-300 mt-0.5">
-                            Intenta responder en voz alta antes de descubrir la solución (fija el recuerdo en tu memoria auditiva y reduce la impulsividad).
-                          </p>
-                        </div>
+            {showFlashcardCatalogGrid ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-[540px] overflow-y-auto pr-1">
+                {activeDeck.map((card, idx) => (
+                  <div
+                    key={card.id}
+                    className="p-4 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50/60 dark:bg-stone-800/40 flex flex-col justify-between gap-2"
+                  >
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between text-[11px] font-mono text-stone-500 dark:text-stone-400">
+                        <span className="font-bold text-amber-700 dark:text-amber-400">
+                          {card.subject}
+                        </span>
+                        <span>{card.mastered ? '✓ Dominada' : `#${idx + 1}`}</span>
                       </div>
+                      <h4 className="text-xs font-bold text-stone-900 dark:text-white">
+                        {card.question}
+                      </h4>
+                      <p className="text-xs text-stone-700 dark:text-stone-300">
+                        <strong>R:</strong> {card.answer}
+                      </p>
+                      <p className="text-[11px] text-amber-800 dark:text-amber-300">
+                        💡 {card.mnemonicHint}
+                      </p>
                     </div>
+                    <div className="pt-2 border-t border-stone-200/70 dark:border-stone-700/60 flex items-center justify-between">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCardIndex(idx);
+                          setShowFlashcardCatalogGrid(false);
+                        }}
+                        className="text-xs font-semibold text-amber-700 dark:text-amber-400 hover:underline"
+                      >
+                        Practicar con voz →
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onToggleFlashcardMastered(card.id)}
+                        className="text-xs font-medium text-emerald-700 dark:text-emerald-400 hover:underline"
+                      >
+                        {card.mastered ? 'Dominada ✓' : 'Marcar dominada'}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <>
+                <div className="flex items-center justify-between text-xs text-stone-500 dark:text-stone-400">
+                  <span>
+                    Asignatura: <strong className="text-stone-800 dark:text-stone-200">{currentCard.subject}</strong>
+                    <span aria-hidden="true"> · </span>
+                    Tarjeta <span className="font-mono tabular-nums">{safeCardIndex + 1}</span> de{' '}
+                    <span className="font-mono tabular-nums">{activeDeck.length}</span>
+                  </span>
+                  <span className="font-mono text-emerald-700 dark:text-emerald-400">
+                    Dominadas: {activeDeck.filter((c) => c.mastered).length}/{activeDeck.length}
+                  </span>
+                </div>
 
-                    {/* State A: Idle - Ready to record */}
-                    {!isRecordingCardVoice && !currentCardRecord?.audioUrl && (
-                      <div className="pt-1 space-y-2">
-                        <button
-                          type="button"
-                          onClick={() => startCardRecording(currentCard.id)}
-                          className="w-full flex items-center justify-center gap-2.5 py-3 px-4 rounded-xl bg-amber-500 hover:bg-amber-600 active:scale-[0.99] text-stone-950 font-bold text-xs sm:text-sm shadow-sm transition-all"
-                        >
-                          <Mic className="w-4 h-4 text-stone-950 shrink-0" />
-                          <span>Activar Micrófono y Responder en Voz Alta (+15 PE)</span>
-                        </button>
-                        <p className="text-[11px] text-center text-stone-500 dark:text-stone-400">
-                          Pulsar activará tu micrófono para que grabes tu propia explicación antes de dar vuelta a la tarjeta.
-                        </p>
+                {(() => {
+                  const currentCardRecord = cardAudioRecords[currentCard.id];
+                  return (
+                    <div className="p-6 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50/70 dark:bg-stone-800/40 space-y-4">
+                      <div className="flex items-center justify-between text-xs text-stone-500 dark:text-stone-400">
+                        <span className="font-semibold">
+                          {showAnswer ? 'RESPUESTA EXPLICADA' : 'PREGUNTA DE AUTOEVALUACIÓN'}
+                        </span>
+                        <span>{currentCard.mastered ? '✓ Dominada' : '○ En repaso'}</span>
                       </div>
-                    )}
 
-                    {/* State B: Recording in progress */}
-                    {isRecordingCardVoice && (
-                      <div className="p-3.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-300 dark:border-rose-800 space-y-3">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <span className="relative flex h-3 w-3">
-                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
-                              <span className="relative inline-flex rounded-full h-3 w-3 bg-rose-600"></span>
-                            </span>
-                            <span className="text-xs font-bold text-rose-700 dark:text-rose-300 uppercase tracking-wide">
-                              Grabando tu respuesta oral...
-                            </span>
+                      <h3 className="text-lg font-bold text-stone-900 dark:text-white leading-snug">
+                        {currentCard.question}
+                      </h3>
+
+                      {/* VOICE RECORDING & ACTIVE RECALL ZONE */}
+                      <div className="p-4 rounded-xl border border-amber-300 dark:border-amber-800/70 bg-amber-50/90 dark:bg-amber-950/30 space-y-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex items-start gap-2.5">
+                            <div className="p-2 rounded-lg bg-amber-500 text-stone-950 shrink-0 mt-0.5 shadow-xs">
+                              <Mic className="w-4 h-4" />
+                            </div>
+                            <div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <h4 className="text-xs font-bold text-stone-900 dark:text-stone-100">
+                                  Respuesta en Voz Alta (Recuerdo Activo TDAH)
+                                </h4>
+                                {currentCardRecord?.awarded ? (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700">
+                                    <Sparkles className="w-3 h-3" />
+                                    +15 PE Ganados
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-200 dark:bg-amber-900/50 text-amber-900 dark:text-amber-200">
+                                    +15 PE por ensayar oralmente
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-xs text-stone-600 dark:text-stone-300 mt-0.5">
+                                Intenta responder en voz alta antes de descubrir la solución (fija el recuerdo en tu memoria auditiva y reduce la impulsividad).
+                              </p>
+                            </div>
                           </div>
-                          <span className="text-xs font-mono font-bold text-rose-700 dark:text-rose-300 tabular-nums">
-                            {String(Math.floor(recordingCardSeconds / 60)).padStart(2, '0')}:
-                            {String(recordingCardSeconds % 60).padStart(2, '0')} / 01:30
-                          </span>
                         </div>
 
-                        {/* Live voice transcription */}
-                        <div className="p-2.5 rounded-lg bg-white dark:bg-stone-900 border border-rose-200 dark:border-rose-900/40 text-xs">
-                          <span className="text-stone-400 dark:text-stone-500 text-[10px] block uppercase font-mono mb-1">
-                            Transcripción en vivo:
-                          </span>
-                          <p className="italic text-stone-800 dark:text-stone-200">
-                            {liveCardTranscript || 'Escuchando tu voz... di tu respuesta en voz alta con tranquilidad...'}
-                          </p>
-                        </div>
-
-                        <button
-                          type="button"
-                          onClick={() => stopCardRecording(currentCard.id)}
-                          className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-sm transition-colors"
-                        >
-                          <Square className="w-3.5 h-3.5 fill-current" />
-                          <span>Detener Grabación y Guardar Audio (+15 PE)</span>
-                        </button>
-                      </div>
-                    )}
-
-                    {/* State C: Audio Recorded */}
-                    {!isRecordingCardVoice && currentCardRecord?.audioUrl && (
-                      <div className="p-3.5 rounded-xl bg-white dark:bg-stone-900 border border-amber-300 dark:border-amber-800 space-y-2.5 shadow-2xs">
-                        <div className="flex items-center justify-between text-xs">
-                          <span className="font-semibold text-emerald-700 dark:text-emerald-400 flex items-center gap-1.5">
-                            <CheckCircle2 className="w-4 h-4" />
-                            Tu respuesta oral registrada
-                          </span>
-                          <span className="text-stone-500 dark:text-stone-400 font-mono text-[11px]">
-                            {currentCardRecord.durationSec}s de audio
-                          </span>
-                        </div>
-
-                        <audio
-                          controls
-                          src={currentCardRecord.audioUrl}
-                          className="w-full h-9 rounded"
-                        />
-
-                        {currentCardRecord.transcript && (
-                          <div className="text-xs bg-stone-50 dark:bg-stone-800/70 p-2.5 rounded-lg border border-stone-200 dark:border-stone-700">
-                            <span className="text-stone-500 dark:text-stone-400 text-[10px] uppercase font-mono block mb-0.5">
-                              Lo que dijiste en voz alta:
-                            </span>
-                            <p className="text-stone-900 dark:text-stone-100 italic">
-                              "{currentCardRecord.transcript}"
+                        {/* State A: Idle - Ready to record */}
+                        {!isRecordingCardVoice && !currentCardRecord?.audioUrl && (
+                          <div className="pt-1 space-y-2">
+                            <button
+                              type="button"
+                              onClick={() => startCardRecording(currentCard.id)}
+                              className="w-full flex items-center justify-center gap-2.5 py-3 px-4 rounded-xl bg-amber-500 hover:bg-amber-600 active:scale-[0.99] text-stone-950 font-bold text-xs sm:text-sm shadow-sm transition-all"
+                            >
+                              <Mic className="w-4 h-4 text-stone-950 shrink-0" />
+                              <span>Activar Micrófono y Responder en Voz Alta (+15 PE)</span>
+                            </button>
+                            <p className="text-[11px] text-center text-stone-500 dark:text-stone-400">
+                              Pulsar activará tu micrófono para que grabes tu propia explicación antes de dar vuelta a la tarjeta.
                             </p>
                           </div>
                         )}
 
-                        <div className="flex items-center justify-between pt-1">
-                          <button
-                            type="button"
-                            onClick={() => startCardRecording(currentCard.id)}
-                            className="flex items-center gap-1.5 text-xs text-amber-700 dark:text-amber-400 font-semibold hover:underline"
-                          >
-                            <RotateCcw className="w-3.5 h-3.5" />
-                            Volver a grabar
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => discardCardAudio(currentCard.id)}
-                            className="flex items-center gap-1 text-xs text-stone-500 hover:text-rose-600 dark:hover:text-rose-400 transition-colors"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                            Descartar
-                          </button>
-                        </div>
-                      </div>
-                    )}
+                        {/* State B: Recording in progress */}
+                        {isRecordingCardVoice && (
+                          <div className="p-3.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-300 dark:border-rose-800 space-y-3">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <span className="relative flex h-3 w-3">
+                                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+                                  <span className="relative inline-flex rounded-full h-3 w-3 bg-rose-600"></span>
+                                </span>
+                                <span className="text-xs font-bold text-rose-700 dark:text-rose-300 uppercase tracking-wide">
+                                  Grabando tu respuesta oral...
+                                </span>
+                              </div>
+                              <span className="text-xs font-mono font-bold text-rose-700 dark:text-rose-300 tabular-nums">
+                                {String(Math.floor(recordingCardSeconds / 60)).padStart(2, '0')}:
+                                {String(recordingCardSeconds % 60).padStart(2, '0')} / 01:30
+                              </span>
+                            </div>
 
-                    {/* Microphone Error Alert */}
-                    {micPermissionError && (
-                      <div className="p-3 rounded-lg bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-xs text-rose-800 dark:text-rose-300 flex items-start gap-2">
-                        <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-rose-600 dark:text-rose-400" />
-                        <div>
-                          <p className="font-semibold">Atención con el micrófono:</p>
-                          <p className="mt-0.5 leading-relaxed">{micPermissionError}</p>
-                        </div>
-                      </div>
-                    )}
-                  </div>
+                            {/* Live voice transcription */}
+                            <div className="p-2.5 rounded-lg bg-white dark:bg-stone-900 border border-rose-200 dark:border-rose-900/40 text-xs">
+                              <span className="text-stone-400 dark:text-stone-500 text-[10px] block uppercase font-mono mb-1">
+                                Transcripción en vivo:
+                              </span>
+                              <p className="italic text-stone-800 dark:text-stone-200">
+                                {liveCardTranscript ||
+                                  'Escuchando tu voz... di tu respuesta en voz alta con tranquilidad...'}
+                              </p>
+                            </div>
 
-                  {showAnswer ? (
-                    <div className="pt-3 border-t border-stone-200 dark:border-stone-700 space-y-3">
-                      <p className="text-sm text-stone-800 dark:text-stone-100 leading-relaxed font-medium">
-                        {currentCard.answer}
-                      </p>
-                      <p className="text-xs text-amber-800 dark:text-amber-300 flex items-center gap-1.5">
-                        <Lightbulb className="w-4 h-4 shrink-0" />
-                        <span>{currentCard.mnemonicHint}</span>
-                      </p>
+                            <button
+                              type="button"
+                              onClick={() => stopCardRecording(currentCard.id)}
+                              className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-sm transition-colors"
+                            >
+                              <Square className="w-3.5 h-3.5 fill-current" />
+                              <span>Detener Grabación y Guardar Audio (+15 PE)</span>
+                            </button>
+                          </div>
+                        )}
+
+                        {/* State C: Audio Recorded */}
+                        {!isRecordingCardVoice && currentCardRecord?.audioUrl && (
+                          <div className="p-3.5 rounded-xl bg-white dark:bg-stone-900 border border-amber-300 dark:border-amber-800 space-y-2.5 shadow-2xs">
+                            <div className="flex items-center justify-between text-xs">
+                              <span className="font-semibold text-emerald-700 dark:text-emerald-400 flex items-center gap-1.5">
+                                <CheckCircle2 className="w-4 h-4" />
+                                Tu respuesta oral registrada
+                              </span>
+                              <span className="text-stone-500 dark:text-stone-400 font-mono text-[11px]">
+                                {currentCardRecord.durationSec}s de audio
+                              </span>
+                            </div>
+
+                            <audio
+                              controls
+                              src={currentCardRecord.audioUrl}
+                              className="w-full h-9 rounded"
+                            />
+
+                            {currentCardRecord.transcript && (
+                              <div className="text-xs bg-stone-50 dark:bg-stone-800/70 p-2.5 rounded-lg border border-stone-200 dark:border-stone-700">
+                                <span className="text-stone-500 dark:text-stone-400 text-[10px] uppercase font-mono block mb-0.5">
+                                  Lo que dijiste en voz alta:
+                                </span>
+                                <p className="text-stone-900 dark:text-stone-100 italic">
+                                  "{currentCardRecord.transcript}"
+                                </p>
+                              </div>
+                            )}
+
+                            <div className="flex items-center justify-between pt-1">
+                              <button
+                                type="button"
+                                onClick={() => startCardRecording(currentCard.id)}
+                                className="flex items-center gap-1.5 text-xs text-amber-700 dark:text-amber-400 font-semibold hover:underline"
+                              >
+                                <RotateCcw className="w-3.5 h-3.5" />
+                                Volver a grabar
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => discardCardAudio(currentCard.id)}
+                                className="flex items-center gap-1 text-xs text-stone-500 hover:text-rose-600 dark:hover:text-rose-400 transition-colors"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                                Descartar
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Microphone Error Alert */}
+                        {micPermissionError && (
+                          <div className="p-3 rounded-lg bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-xs text-rose-800 dark:text-rose-300 flex items-start gap-2">
+                            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-rose-600 dark:text-rose-400" />
+                            <div>
+                              <p className="font-semibold">Atención con el micrófono:</p>
+                              <p className="mt-0.5 leading-relaxed">{micPermissionError}</p>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {showAnswer ? (
+                        <div className="pt-3 border-t border-stone-200 dark:border-stone-700 space-y-3">
+                          <p className="text-sm text-stone-800 dark:text-stone-100 leading-relaxed font-medium">
+                            {currentCard.answer}
+                          </p>
+                          <p className="text-xs text-amber-800 dark:text-amber-300 flex items-center gap-1.5">
+                            <Lightbulb className="w-4 h-4 shrink-0" />
+                            <span>{currentCard.mnemonicHint}</span>
+                          </p>
+                        </div>
+                      ) : null}
+
+                      <div className="pt-3 flex flex-wrap items-center justify-between gap-3">
+                        <button
+                          type="button"
+                          onClick={() => setShowAnswer((prev) => !prev)}
+                          className="px-4 py-2 rounded-lg bg-stone-900 dark:bg-amber-500 text-white dark:text-stone-950 text-xs font-semibold hover:opacity-90 transition-opacity whitespace-nowrap shrink-0"
+                        >
+                          {showAnswer ? 'Ocultar respuesta' : 'Mostrar respuesta y truco visual'}
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onToggleFlashcardMastered(currentCard.id);
+                            soundFX.playStepComplete();
+                          }}
+                          className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-stone-300 dark:border-stone-700 text-xs font-medium text-stone-700 dark:text-stone-200 hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors whitespace-nowrap shrink-0"
+                        >
+                          <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                          {currentCard.mastered
+                            ? 'Marcada como dominada'
+                            : 'Marcar como dominada (+20 PE)'}
+                        </button>
+                      </div>
                     </div>
-                  ) : null}
+                  );
+                })()}
 
-                  <div className="pt-3 flex flex-wrap items-center justify-between gap-3">
-                    <button
-                      type="button"
-                      onClick={() => setShowAnswer((prev) => !prev)}
-                      className="px-4 py-2 rounded-lg bg-stone-900 dark:bg-amber-500 text-white dark:text-stone-950 text-xs font-semibold hover:opacity-90 transition-opacity whitespace-nowrap shrink-0"
-                    >
-                      {showAnswer ? 'Ocultar respuesta' : 'Mostrar respuesta y truco visual'}
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onToggleFlashcardMastered(currentCard.id);
-                        soundFX.playStepComplete();
-                      }}
-                      className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-stone-300 dark:border-stone-700 text-xs font-medium text-stone-700 dark:text-stone-200 hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors whitespace-nowrap shrink-0"
-                    >
-                      <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-                      {currentCard.mastered ? 'Marcada como dominada' : 'Marcar como dominada (+20 PE)'}
-                    </button>
-                  </div>
+                <div className="flex items-center justify-between">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (isRecordingCardVoice) stopCardRecording(currentCard.id);
+                      setShowAnswer(false);
+                      setCardIndex((prev) => (prev - 1 + activeDeck.length) % activeDeck.length);
+                    }}
+                    className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-stone-200 dark:border-stone-800 text-xs font-medium text-stone-700 dark:text-stone-300 hover:bg-stone-50 dark:hover:bg-stone-800 whitespace-nowrap shrink-0"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                    Anterior
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (isRecordingCardVoice) stopCardRecording(currentCard.id);
+                      setShowAnswer(false);
+                      setCardIndex((prev) => (prev + 1) % activeDeck.length);
+                    }}
+                    className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-stone-200 dark:border-stone-800 text-xs font-medium text-stone-700 dark:text-stone-300 hover:bg-stone-50 dark:hover:bg-stone-800 whitespace-nowrap shrink-0"
+                  >
+                    Siguiente
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
                 </div>
-              );
-            })()}
-
-            <div className="flex items-center justify-between">
-              <button
-                type="button"
-                onClick={() => {
-                  if (isRecordingCardVoice) stopCardRecording(currentCard.id);
-                  setShowAnswer(false);
-                  setCardIndex((prev) => (prev - 1 + activeDeck.length) % activeDeck.length);
-                }}
-                className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-stone-200 dark:border-stone-800 text-xs font-medium text-stone-700 dark:text-stone-300 hover:bg-stone-50 dark:hover:bg-stone-800 whitespace-nowrap shrink-0"
-              >
-                <ChevronLeft className="w-4 h-4" />
-                Anterior
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  if (isRecordingCardVoice) stopCardRecording(currentCard.id);
-                  setShowAnswer(false);
-                  setCardIndex((prev) => (prev + 1) % activeDeck.length);
-                }}
-                className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-stone-200 dark:border-stone-800 text-xs font-medium text-stone-700 dark:text-stone-300 hover:bg-stone-50 dark:hover:bg-stone-800 whitespace-nowrap shrink-0"
-              >
-                Siguiente
-                <ChevronRight className="w-4 h-4" />
-              </button>
-            </div>
+              </>
+            )}
           </div>
         )}
 
-        {/* TECHNIQUE 2: VISUAL MIND MAP BUILDER */}
+        {/* TECHNIQUE 2: VISUAL MIND MAP BUILDER WITH COURSE TEMPLATES */}
         {techniqueMode === 'MINDMAP' && (
           <div className="space-y-5">
+            <div className="space-y-2">
+              <span className="text-xs font-semibold text-stone-600 dark:text-stone-300 block">
+                Plantillas de Mapas Visuales de {courseMeta.shortLabel} (Selecciona una o personalízala):
+              </span>
+              <div className="flex flex-wrap gap-2">
+                {COURSE_MIND_MAP_TEMPLATES.map((tmpl) => {
+                  const isCurrentCourse = tmpl.course === selectedCourse;
+                  const isSelected = tmpl.id === selectedMindTemplateId;
+                  return (
+                    <button
+                      key={tmpl.id}
+                      type="button"
+                      onClick={() => handleSelectMindTemplate(tmpl.id)}
+                      className={`px-3 py-1.5 rounded-lg border text-xs transition-colors ${
+                        isSelected
+                          ? 'bg-amber-600 text-white border-amber-600 font-semibold'
+                          : isCurrentCourse
+                          ? 'bg-amber-50 dark:bg-amber-950/30 border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-200 font-medium'
+                          : 'bg-stone-50 dark:bg-stone-800 border-stone-200 dark:border-stone-700 text-stone-600 dark:text-stone-300'
+                      }`}
+                    >
+                      [{tmpl.course}] {tmpl.subject}: {tmpl.centralTopic.split('(')[0].trim()}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
             <div className="flex flex-col sm:flex-row sm:items-center gap-3">
               <label
                 htmlFor="central-node-input"
@@ -1048,8 +1279,8 @@ export const StudyStudio: React.FC<StudyStudioProps> = ({
             </div>
 
             <div className="p-5 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50/60 dark:bg-stone-800/40 space-y-5">
-              <div className="mx-auto max-w-xs p-3.5 rounded-xl bg-amber-600 text-white text-center shadow-xs">
-                <div className="text-[11px] font-mono opacity-85">NÚCLEO CENTRAL</div>
+              <div className="mx-auto max-w-md p-3.5 rounded-xl bg-amber-600 text-white text-center shadow-xs">
+                <div className="text-[11px] font-mono opacity-85">NÚCLEO CENTRAL DEL MAPA</div>
                 <div className="text-sm font-bold mt-0.5">{centralTopic}</div>
               </div>
 
@@ -1061,17 +1292,25 @@ export const StudyStudio: React.FC<StudyStudioProps> = ({
                   >
                     <div>
                       <div className="flex items-center justify-between text-xs text-stone-500 dark:text-stone-400 font-mono">
-                        <span>RAMA 0{idx + 1}</span>
+                        <span className="font-bold text-amber-700 dark:text-amber-400">
+                          {node.category} 0{idx + 1}
+                        </span>
                         <button
                           type="button"
-                          onClick={() => setMindNodes((prev) => prev.filter((n) => n.id !== node.id))}
+                          onClick={() =>
+                            setMindNodes((prev) => prev.filter((n) => n.id !== node.id))
+                          }
                           className="text-stone-400 hover:text-rose-600"
                         >
                           Quitar
                         </button>
                       </div>
-                      <h4 className="text-sm font-bold text-stone-900 dark:text-white mt-1">{node.label}</h4>
-                      <p className="text-xs text-stone-600 dark:text-stone-300 mt-1">{node.notes}</p>
+                      <h4 className="text-sm font-bold text-stone-900 dark:text-white mt-1">
+                        {node.label}
+                      </h4>
+                      <p className="text-xs text-stone-600 dark:text-stone-300 mt-1 leading-relaxed">
+                        {node.notes}
+                      </p>
                     </div>
                   </div>
                 ))}
@@ -1083,14 +1322,14 @@ export const StudyStudio: React.FC<StudyStudioProps> = ({
                 type="text"
                 value={newNodeLabel}
                 onChange={(e) => setNewNodeLabel(e.target.value)}
-                placeholder="Nueva rama (ej. Citoplasma)..."
+                placeholder="Nueva rama (ej. Citoplasma, Ley de Ohm)..."
                 className="flex-1 px-3 py-2 text-xs rounded-lg border border-stone-300 dark:border-stone-700 bg-stone-50 dark:bg-stone-800 text-stone-900 dark:text-white"
               />
               <input
                 type="text"
                 value={newNodeNotes}
                 onChange={(e) => setNewNodeNotes(e.target.value)}
-                placeholder="Explicación corta en 5 palabras..."
+                placeholder="Explicación corta y visual..."
                 className="flex-1 px-3 py-2 text-xs rounded-lg border border-stone-300 dark:border-stone-700 bg-stone-50 dark:bg-stone-800 text-stone-900 dark:text-white"
               />
               <button
@@ -1103,117 +1342,223 @@ export const StudyStudio: React.FC<StudyStudioProps> = ({
           </div>
         )}
 
-        {/* TECHNIQUE 3: CORNELL NOTE SYSTEM */}
+        {/* TECHNIQUE 3: CORNELL NOTE SYSTEM WITH PRE-LOADED COURSE MODELS */}
         {techniqueMode === 'CORNELL' && (
           <div className="space-y-5">
-            <form onSubmit={handleSaveCornell} className="space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <input
-                  type="text"
-                  value={cornellSubject}
-                  onChange={(e) => setCornellSubject(e.target.value)}
-                  placeholder="Asignatura"
-                  className="px-3 py-2 text-xs rounded-lg border border-stone-300 dark:border-stone-700 bg-stone-50 dark:bg-stone-800 text-stone-900 dark:text-white"
-                />
-                <input
-                  type="text"
-                  required
-                  value={cornellTopic}
-                  onChange={(e) => setCornellTopic(e.target.value)}
-                  placeholder="Título del tema de clase..."
-                  className="px-3 py-2 text-xs rounded-lg border border-stone-300 dark:border-stone-700 bg-stone-50 dark:bg-stone-800 text-stone-900 dark:text-white"
-                />
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="text-xs text-stone-600 dark:text-stone-300">
+                Mostrando{' '}
+                <strong>
+                  {displayedCornellNotes.length} fichas Cornell de{' '}
+                  {showAllCoursesCornell ? 'todos los cursos' : courseMeta.shortLabel}
+                </strong>
               </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-12 gap-3">
-                <div className="sm:col-span-4">
-                  <label className="block text-xs font-semibold text-stone-700 dark:text-stone-300 mb-1">
-                    1. Palabras Clave / Preguntas
-                  </label>
-                  <textarea
-                    rows={4}
-                    value={cornellCuesText}
-                    onChange={(e) => setCornellCuesText(e.target.value)}
-                    placeholder="Una palabra o pregunta por línea..."
-                    className="w-full p-2.5 text-xs rounded-lg border border-stone-300 dark:border-stone-700 bg-stone-50 dark:bg-stone-800 text-stone-900 dark:text-white"
-                  />
-                </div>
-                <div className="sm:col-span-8">
-                  <label className="block text-xs font-semibold text-stone-700 dark:text-stone-300 mb-1">
-                    2. Ideas Principales de Clase (Frases cortas)
-                  </label>
-                  <textarea
-                    rows={4}
-                    required
-                    value={cornellBodyText}
-                    onChange={(e) => setCornellBodyText(e.target.value)}
-                    placeholder="Usa guiones cortos, abreviaturas y evita párrafos densos..."
-                    className="w-full p-2.5 text-xs rounded-lg border border-stone-300 dark:border-stone-700 bg-stone-50 dark:bg-stone-800 text-stone-900 dark:text-white"
-                  />
-                </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAllCoursesCornell((prev) => !prev)}
+                  className="px-2.5 py-1 rounded-lg border border-stone-300 dark:border-stone-700 text-xs font-semibold text-stone-700 dark:text-stone-200 hover:bg-stone-100 dark:hover:bg-stone-800"
+                >
+                  {showAllCoursesCornell
+                    ? `Ver solo ${courseMeta.shortLabel}`
+                    : 'Ver todos los cursos'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowCornellForm((prev) => !prev)}
+                  className="px-3 py-1 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold"
+                >
+                  {showCornellForm ? 'Cerrar editor' : '+ Crear Nueva Ficha Cornell'}
+                </button>
               </div>
+            </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-stone-700 dark:text-stone-300 mb-1">
-                  3. Resumen en 1 sola frase (Para fijar en la memoria a largo plazo)
-                </label>
-                <input
-                  type="text"
-                  value={cornellSummaryText}
-                  onChange={(e) => setCornellSummaryText(e.target.value)}
-                  placeholder="Si tuviera que resumir esta página en un tuit, diría que..."
-                  className="w-full px-3 py-2 text-xs rounded-lg border border-stone-300 dark:border-stone-700 bg-stone-50 dark:bg-stone-800 text-stone-900 dark:text-white"
-                />
-              </div>
-
-              <button
-                type="submit"
-                className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold transition-colors"
+            {showCornellForm && (
+              <form
+                onSubmit={handleSaveCornell}
+                className="p-4 rounded-xl border border-amber-300 dark:border-amber-800 bg-amber-50/40 dark:bg-amber-950/20 space-y-4"
               >
-                Guardar Ficha Cornell (+30 PE)
-              </button>
-            </form>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <input
+                    type="text"
+                    value={cornellSubject}
+                    onChange={(e) => setCornellSubject(e.target.value)}
+                    placeholder="Asignatura"
+                    className="px-3 py-2 text-xs rounded-lg border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-900 dark:text-white"
+                  />
+                  <input
+                    type="text"
+                    required
+                    value={cornellTopic}
+                    onChange={(e) => setCornellTopic(e.target.value)}
+                    placeholder="Título del tema de clase..."
+                    className="px-3 py-2 text-xs rounded-lg border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-900 dark:text-white"
+                  />
+                </div>
 
-            {cornellNotes.length > 0 && (
-              <div className="pt-4 border-t border-stone-200 dark:border-stone-800 space-y-3">
-                <p className="text-xs font-semibold text-stone-600 dark:text-stone-300">
-                  Fichas Cornell Guardadas ({cornellNotes.length}):
-                </p>
-                {cornellNotes.map((note) => (
-                  <div
-                    key={note.id}
-                    className="p-4 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50/50 dark:bg-stone-800/30 space-y-2"
-                  >
-                    <div className="text-xs text-stone-500 dark:text-stone-400">
-                      <span>{note.subject}</span>
+                <div className="grid grid-cols-1 sm:grid-cols-12 gap-3">
+                  <div className="sm:col-span-4">
+                    <label className="block text-xs font-semibold text-stone-700 dark:text-stone-300 mb-1">
+                      1. Palabras Clave / Preguntas
+                    </label>
+                    <textarea
+                      rows={4}
+                      value={cornellCuesText}
+                      onChange={(e) => setCornellCuesText(e.target.value)}
+                      placeholder="Una palabra o pregunta por línea..."
+                      className="w-full p-2.5 text-xs rounded-lg border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-900 dark:text-white"
+                    />
+                  </div>
+                  <div className="sm:col-span-8">
+                    <label className="block text-xs font-semibold text-stone-700 dark:text-stone-300 mb-1">
+                      2. Ideas Principales de Clase (Frases cortas)
+                    </label>
+                    <textarea
+                      rows={4}
+                      required
+                      value={cornellBodyText}
+                      onChange={(e) => setCornellBodyText(e.target.value)}
+                      placeholder="Usa guiones cortos, abreviaturas y evita párrafos densos..."
+                      className="w-full p-2.5 text-xs rounded-lg border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-900 dark:text-white"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-stone-700 dark:text-stone-300 mb-1">
+                    3. Resumen en 1 sola frase (Para fijar en la memoria a largo plazo)
+                  </label>
+                  <input
+                    type="text"
+                    value={cornellSummaryText}
+                    onChange={(e) => setCornellSummaryText(e.target.value)}
+                    placeholder="Si tuviera que resumir esta página en un tuit, diría que..."
+                    className="w-full px-3 py-2 text-xs rounded-lg border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-900 dark:text-white"
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold transition-colors"
+                >
+                  Guardar Ficha Cornell (+30 PE)
+                </button>
+              </form>
+            )}
+
+            <div className="space-y-3">
+              {displayedCornellNotes.map((note) => (
+                <div
+                  key={note.id}
+                  className="p-4 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50/50 dark:bg-stone-800/30 space-y-3"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-stone-500 dark:text-stone-400">
+                    <div>
+                      <span className="font-bold text-amber-700 dark:text-amber-400">
+                        [{note.course}] {note.subject}
+                      </span>
                       <span aria-hidden="true"> · </span>
                       <span>{note.date}</span>
                     </div>
-                    <h4 className="text-sm font-bold text-stone-900 dark:text-white">{note.topic}</h4>
-                    <p className="text-xs text-stone-700 dark:text-stone-300 whitespace-pre-line">
-                      {note.notes}
-                    </p>
-                    <p className="text-xs font-medium text-amber-800 dark:text-amber-300 pt-1">
-                      Síntesis: {note.summary}
-                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCornellSubject(note.subject);
+                        setCornellTopic(`${note.topic} (Mi versión)`);
+                        setCornellCuesText(note.cues.join('\n'));
+                        setCornellBodyText(note.notes);
+                        setCornellSummaryText(note.summary);
+                        setShowCornellForm(true);
+                      }}
+                      className="text-xs font-semibold text-amber-700 dark:text-amber-400 hover:underline"
+                    >
+                      Editar / Usar como plantilla →
+                    </button>
                   </div>
-                ))}
-              </div>
-            )}
+
+                  <h4 className="text-sm font-bold text-stone-900 dark:text-white">{note.topic}</h4>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 pt-1">
+                    <div className="sm:col-span-4 p-3 rounded-lg bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-700 space-y-1.5">
+                      <div className="text-[10px] font-mono uppercase text-stone-400">
+                        1. Preguntas / Claves
+                      </div>
+                      <ul className="space-y-1 text-xs font-medium text-amber-800 dark:text-amber-300">
+                        {note.cues.map((cue, cIdx) => (
+                          <li key={cIdx}>• {cue}</li>
+                        ))}
+                      </ul>
+                    </div>
+
+                    <div className="sm:col-span-8 p-3 rounded-lg bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-700 space-y-1">
+                      <div className="text-[10px] font-mono uppercase text-stone-400">
+                        2. Apuntes Estructurados
+                      </div>
+                      <p className="text-xs text-stone-700 dark:text-stone-200 whitespace-pre-line leading-relaxed">
+                        {note.notes}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="p-2.5 rounded-lg bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/60 text-xs text-stone-800 dark:text-stone-200">
+                    <strong className="text-amber-900 dark:text-amber-300">3. Síntesis en 1 frase: </strong>
+                    {note.summary}
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
-        {/* TECHNIQUE 4: FEYNMAN EXPLANATION TRAINER */}
+        {/* TECHNIQUE 4: FEYNMAN EXPLANATION TRAINER WITH GUIDED CHALLENGES */}
         {techniqueMode === 'FEYNMAN' && (
           <div className="space-y-4">
-            <p className="text-xs text-stone-600 dark:text-stone-300">
-              La <strong>Técnica Feynman</strong> evita estudiar de memoria sin comprender: consiste en explicar el concepto con palabras sencillas y un ejemplo cotidiano.
-            </p>
+            <div className="space-y-2">
+              <span className="text-xs font-semibold text-stone-600 dark:text-stone-300 block">
+                Retos Guiados Feynman de {courseMeta.shortLabel} (Elige un tema para explicarlo en voz alta o por escrito):
+              </span>
+              <div className="flex flex-wrap gap-2">
+                {FEYNMAN_GUIDED_CHALLENGES.map((ch) => {
+                  const isCurrentCourse = ch.course === selectedCourse;
+                  const isSelected = ch.id === selectedFeynmanId;
+                  return (
+                    <button
+                      key={ch.id}
+                      type="button"
+                      onClick={() => handleSelectFeynmanChallenge(ch.id)}
+                      className={`px-3 py-1.5 rounded-lg border text-xs transition-colors ${
+                        isSelected
+                          ? 'bg-amber-600 text-white border-amber-600 font-semibold'
+                          : isCurrentCourse
+                          ? 'bg-amber-50 dark:bg-amber-950/30 border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-200 font-medium'
+                          : 'bg-stone-50 dark:bg-stone-800 border-stone-200 dark:border-stone-700 text-stone-600 dark:text-stone-300'
+                      }`}
+                    >
+                      [{ch.course}] {ch.subject}: {ch.concept.split('(')[0].trim()}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="p-3 rounded-xl bg-stone-50 dark:bg-stone-800/50 border border-stone-200 dark:border-stone-800 text-xs flex flex-wrap items-center gap-2">
+              <span className="font-semibold text-stone-700 dark:text-stone-300">
+                Palabras clave que debes intentar incluir en tu explicación:
+              </span>
+              {feynmanKeyTerms.map((term) => (
+                <span
+                  key={term}
+                  className="px-2 py-0.5 rounded bg-amber-100 dark:bg-amber-950/60 text-amber-900 dark:text-amber-300 font-mono text-[11px] font-semibold"
+                >
+                  {term}
+                </span>
+              ))}
+            </div>
 
             <div className="space-y-3">
               <div>
                 <label className="block text-xs font-semibold text-stone-700 dark:text-stone-300 mb-1">
-                  Paso 1: ¿Qué concepto estás estudiando hoy?
+                  Paso 1: ¿Qué concepto estás explicando?
                 </label>
                 <input
                   type="text"
@@ -1229,7 +1574,7 @@ export const StudyStudio: React.FC<StudyStudioProps> = ({
               <div>
                 <div className="flex items-center justify-between mb-1.5">
                   <label className="block text-xs font-semibold text-stone-700 dark:text-stone-300">
-                    Paso 2: Explícalo con tus propias palabras sin copiar del libro
+                    Paso 2: Explícalo con tus propias palabras (o usa el micrófono)
                   </label>
                   <button
                     type="button"
@@ -1260,7 +1605,7 @@ export const StudyStudio: React.FC<StudyStudioProps> = ({
                   </button>
                 </div>
                 <textarea
-                  rows={2}
+                  rows={3}
                   value={feynmanSimpleExplanation}
                   onChange={(e) => {
                     setFeynmanSimpleExplanation(e.target.value);
@@ -1327,6 +1672,87 @@ export const StudyStudio: React.FC<StudyStudioProps> = ({
                   ✓ ¡Comprensión verificada con claridad!
                 </span>
               )}
+            </div>
+          </div>
+        )}
+
+        {/* TECHNIQUE 5: GUÍAS Y PROTOCOLOS DE EXAMEN TDAH */}
+        {techniqueMode === 'PROTOCOLS' && (
+          <div className="space-y-5">
+            <p className="text-xs text-stone-600 dark:text-stone-300">
+              Protocolos prácticos paso a paso diseñados para estudiantes con TDAH del IES Clot del Moro. Marca cada paso conforme lo apliques para sumar Puntos de Estudio.
+            </p>
+
+            <div className="space-y-4">
+              {ADHD_STUDY_PROTOCOLS.map((proto) => (
+                <div
+                  key={proto.id}
+                  className="p-4 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50/60 dark:bg-stone-800/30 space-y-3"
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div>
+                      <span className="text-[11px] font-mono text-amber-700 dark:text-amber-400 font-semibold">
+                        {proto.badge} · {proto.targetCourses} (+{proto.rewardPE} PE)
+                      </span>
+                      <h3 className="text-sm font-bold text-stone-900 dark:text-white mt-0.5 flex items-center gap-1.5">
+                        <BookOpen className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                        <span>{proto.title}</span>
+                      </h3>
+                      <p className="text-xs text-stone-600 dark:text-stone-300 mt-1">
+                        {proto.summary}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    {proto.steps.map((st, sIdx) => {
+                      const stepKey = `${proto.id}-s-${sIdx}`;
+                      const isDone = Boolean(protocolCheckedSteps[stepKey]);
+                      return (
+                        <button
+                          key={stepKey}
+                          type="button"
+                          onClick={() => {
+                            const nextVal = !protocolCheckedSteps[stepKey];
+                            setProtocolCheckedSteps((prev) => ({
+                              ...prev,
+                              [stepKey]: nextVal,
+                            }));
+                            if (nextVal) {
+                              soundFX.playStepComplete();
+                              onCompleteFocusBlock(5, 20, Math.max(1, Math.round(5 * studyRatioX)));
+                            }
+                          }}
+                          className={`w-full text-left p-3 rounded-lg border text-xs flex items-start gap-2.5 transition-colors ${
+                            isDone
+                              ? 'border-emerald-500/50 bg-emerald-50/40 dark:bg-emerald-950/20 text-stone-500 dark:text-stone-400 line-through'
+                              : 'border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-800 dark:text-stone-200 hover:border-amber-400'
+                          }`}
+                        >
+                          {isDone ? (
+                            <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
+                          ) : (
+                            <Circle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                          )}
+                          <div className="flex-1">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="font-bold text-stone-900 dark:text-white">
+                                Paso {st.stepNumber}: {st.heading}
+                              </span>
+                              <span className="text-[11px] font-mono text-amber-700 dark:text-amber-400 shrink-0">
+                                {st.timeEstimate}
+                              </span>
+                            </div>
+                            <p className="text-stone-600 dark:text-stone-300 mt-0.5 leading-relaxed">
+                              {st.action}
+                            </p>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         )}

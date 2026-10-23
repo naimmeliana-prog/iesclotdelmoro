@@ -4,14 +4,22 @@ import {
   MATH_1ESO_INTERACTIVE_MODULE,
 } from '../data/clotDelMoroData';
 import { CustomCurriculumUnit, getSubjectsForCourse } from '../data/courseCurricula';
+import { buildExtendedQuizForUnit, getEnrichedUnitData } from '../data/expandedStudyContent';
 import { CourseGrade } from '../types';
 import { soundFX } from '../utils/sound';
 import {
+  AlertTriangle,
   BookOpen,
   CheckCircle2,
   ChevronRight,
+  Circle,
+  FileText,
+  GraduationCap,
+  Layers,
   Plus,
   RefreshCw,
+  Square,
+  Volume2,
 } from 'lucide-react';
 
 interface CurriculumAndModulesProps {
@@ -26,6 +34,8 @@ interface CurriculumAndModulesProps {
   lastCurriculumSync: string;
   onForceSyncCurriculum: () => void;
 }
+
+type SubjectStudyViewMode = 'UNIT_STUDY' | 'CHEAT_SHEET' | 'SUBJECT_EXAM';
 
 export const CurriculumAndModules: React.FC<CurriculumAndModulesProps> = ({
   selectedCourse,
@@ -52,7 +62,18 @@ export const CurriculumAndModules: React.FC<CurriculumAndModulesProps> = ({
     courseSubjects.find((s) => s.id === selectedSubjectId) || courseSubjects[0];
 
   const [selectedUnitId, setSelectedUnitId] = useState<string>(currentSubject.units[0].id);
+  const [studyViewMode, setStudyViewMode] = useState<SubjectStudyViewMode>('UNIT_STUDY');
   const [showMathInteractiveModule, setShowMathInteractiveModule] = useState<boolean>(false);
+
+  // Text-to-speech state for ADHD auditory learners
+  const [isSpeakingUnit, setIsSpeakingUnit] = useState<boolean>(false);
+
+  // Interactive checklist state per unit
+  const [checkedChecklistItems, setCheckedChecklistItems] = useState<Record<string, boolean>>({});
+
+  // Subject full exam state
+  const [examAnswers, setExamAnswers] = useState<Record<string, number>>({});
+  const [examSubmitted, setExamSubmitted] = useState<Record<string, boolean>>({});
 
   // Live Unit Publisher / Editor Modal State
   const [showUnitPublisher, setShowUnitPublisher] = useState<boolean>(false);
@@ -71,8 +92,25 @@ export const CurriculumAndModules: React.FC<CurriculumAndModulesProps> = ({
   const [pubOpt3, setPubOpt3] = useState<string>('');
   const [pubCorrectIdx, setPubCorrectIdx] = useState<number>(0);
 
+  // Stop speech synthesis on unmount or unit change
+  const stopSpeaking = () => {
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      try {
+        window.speechSynthesis.cancel();
+      } catch {}
+    }
+    setIsSpeakingUnit(false);
+  };
+
+  useEffect(() => {
+    return () => {
+      stopSpeaking();
+    };
+  }, []);
+
   // Sync when selectedCourse or initialSubjectId changes
   useEffect(() => {
+    stopSpeaking();
     const subjectsForNewCourse = getSubjectsForCourse(selectedCourse, customUnits);
     const matchingSubject =
       (initialSubjectId && subjectsForNewCourse.find((s) => s.id === initialSubjectId)) ||
@@ -82,6 +120,7 @@ export const CurriculumAndModules: React.FC<CurriculumAndModulesProps> = ({
       setSelectedUnitId(matchingSubject.units[0].id);
     }
     setShowMathInteractiveModule(false);
+    setStudyViewMode('UNIT_STUDY');
     setShowUnitPublisher(false);
     setEditingUnitId(null);
   }, [selectedCourse, initialSubjectId]);
@@ -99,18 +138,47 @@ export const CurriculumAndModules: React.FC<CurriculumAndModulesProps> = ({
   const currentUnit =
     currentSubject.units.find((u) => u.id === selectedUnitId) || currentSubject.units[0];
 
+  const enrichedUnit = getEnrichedUnitData(currentUnit, currentSubject.name);
+  const currentUnitExtendedQuiz = buildExtendedQuizForUnit(currentUnit);
+
   const calculatedBreakMinForUnit = Math.round(currentUnit.durationMin * studyRatioX);
 
   const currentLesson = MATH_1ESO_INTERACTIVE_MODULE[activeLessonIndex];
   const calculatedBreakMinForLesson = Math.round(currentLesson.durationMin * studyRatioX);
 
   const handleSelectSubject = (subjId: string) => {
+    stopSpeaking();
     setSelectedSubjectId(subjId);
     const subj = courseSubjects.find((s) => s.id === subjId);
     if (subj && subj.units.length > 0) {
       setSelectedUnitId(subj.units[0].id);
     }
     setShowMathInteractiveModule(false);
+  };
+
+  const handleSpeakUnitAloud = () => {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+    if (isSpeakingUnit) {
+      stopSpeaking();
+      return;
+    }
+    try {
+      window.speechSynthesis.cancel();
+      const schemesText = currentUnit.visualScheme
+        .map((s) => `${s.heading}: ${s.detail}`)
+        .join('. ');
+      const trapsText = enrichedUnit.examTraps.join('. ');
+      const fullText = `${currentSubject.name}, Unidad ${currentUnit.unitNumber}: ${currentUnit.title}. Resumen: ${currentUnit.summary}. Conceptos clave: ${currentUnit.keyConcepts.join(', ')}. Esquema principal: ${schemesText}. Ejemplo práctico: ${currentUnit.practicalExample}. Atención a las trampas de examen: ${trapsText}.`;
+      const utterance = new SpeechSynthesisUtterance(fullText);
+      utterance.lang = currentSubject.shortCode.startsWith('ENG') || currentSubject.shortCode === 'ING' ? 'en-GB' : 'es-ES';
+      utterance.rate = 0.98;
+      utterance.onend = () => setIsSpeakingUnit(false);
+      utterance.onerror = () => setIsSpeakingUnit(false);
+      setIsSpeakingUnit(true);
+      window.speechSynthesis.speak(utterance);
+    } catch {
+      setIsSpeakingUnit(false);
+    }
   };
 
   const handleOpenNewUnitForm = () => {
@@ -218,6 +286,24 @@ export const CurriculumAndModules: React.FC<CurriculumAndModulesProps> = ({
     (q) => quizAnswers[q.id] === q.correctIndex
   ).length;
 
+  // Build subject-wide exam questions from all units in currentSubject
+  const subjectExamQuestions = currentSubject.units.flatMap((unit) => {
+    const extQuiz = buildExtendedQuizForUnit(unit);
+    return extQuiz.slice(0, 2).map((q) => ({
+      ...q,
+      unitNumber: unit.unitNumber,
+      unitTitle: unit.title,
+    }));
+  });
+
+  const subjectExamId = `exam-full-${currentSubject.id}`;
+  const isSubjectExamSubmitted = Boolean(examSubmitted[subjectExamId]);
+  const subjectExamCorrectCount = subjectExamQuestions.filter(
+    (q) => examAnswers[q.id] === q.correctIndex
+  ).length;
+
+  const totalUnitsAcrossCourse = courseSubjects.reduce((acc, s) => acc + s.units.length, 0);
+
   return (
     <div className="space-y-8">
       {/* =====================================================================
@@ -227,10 +313,10 @@ export const CurriculumAndModules: React.FC<CurriculumAndModulesProps> = ({
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 pb-4 border-b border-stone-200 dark:border-stone-800">
           <div>
             <p className="text-xs text-stone-500 dark:text-stone-400">
-              Temarios Oficiales Completos · {courseMeta.label} · Versión {curriculumVersion} · Última sincronización: {lastCurriculumSync}
+              Temarios Oficiales Completos LOMLOE · {courseMeta.label} · Versión {curriculumVersion} · Última sincronización: {lastCurriculumSync}
             </p>
             <h2 className="text-2xl font-bold text-stone-900 dark:text-white mt-0.5">
-              Todas las Asignaturas de {courseMeta.label} ({courseSubjects.length} Materias)
+              Todas las Asignaturas de {courseMeta.label} ({courseSubjects.length} Materias · {totalUnitsAcrossCourse} Unidades Didácticas)
             </h2>
           </div>
           <div className="flex flex-wrap items-center gap-2.5">
@@ -375,7 +461,7 @@ export const CurriculumAndModules: React.FC<CurriculumAndModulesProps> = ({
         )}
 
         {/* Grid of Course Subjects */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
           {courseSubjects.map((subj) => {
             const isSelected = subj.id === selectedSubjectId;
             const completedInSubj = subj.units.filter((u) => completedUnits[u.id]).length;
@@ -386,7 +472,7 @@ export const CurriculumAndModules: React.FC<CurriculumAndModulesProps> = ({
                 onClick={() => handleSelectSubject(subj.id)}
                 className={`text-left p-4 rounded-xl border transition-all flex flex-col justify-between gap-2 ${
                   isSelected
-                    ? 'border-amber-600 dark:border-amber-500 bg-amber-50/80 dark:bg-amber-950/40'
+                    ? 'border-amber-600 dark:border-amber-500 bg-amber-50/80 dark:bg-amber-950/40 shadow-2xs'
                     : 'border-stone-200 dark:border-stone-800 bg-stone-50/50 dark:bg-stone-800/30 hover:border-amber-400'
                 }`}
               >
@@ -396,10 +482,10 @@ export const CurriculumAndModules: React.FC<CurriculumAndModulesProps> = ({
                       [{subj.shortCode}] · {subj.units.length} Unidades
                     </span>
                     <span>
-                      Progreso: {completedInSubj}/{subj.units.length}
+                      {completedInSubj}/{subj.units.length}
                     </span>
                   </div>
-                  <h3 className="text-base font-bold text-stone-900 dark:text-white mt-1">
+                  <h3 className="text-sm font-bold text-stone-900 dark:text-white mt-1">
                     {subj.name}
                   </h3>
                   <p className="text-xs text-stone-600 dark:text-stone-300 mt-1 line-clamp-2">
@@ -408,11 +494,75 @@ export const CurriculumAndModules: React.FC<CurriculumAndModulesProps> = ({
                 </div>
 
                 <div className="pt-2 border-t border-stone-200/70 dark:border-stone-700/60 flex items-center justify-between text-xs font-semibold text-amber-800 dark:text-amber-300">
-                  <span>{isSelected ? '✓ Asignatura seleccionada' : 'Ver unidades y apuntes →'}</span>
+                  <span>{isSelected ? '✓ Asignatura activa' : 'Abrir temario →'}</span>
                 </div>
               </button>
             );
           })}
+        </div>
+      </div>
+
+      {/* =====================================================================
+          SELECTOR DE MODO DE ESTUDIO DE LA ASIGNATURA
+          ===================================================================== */}
+      <div className="flex flex-wrap items-center justify-between gap-4 p-4 rounded-xl border border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900">
+        <div>
+          <span className="text-xs font-mono text-amber-700 dark:text-amber-400 font-semibold">
+            MODO DE APRENDIZAJE ACTIVO · {currentSubject.name.toUpperCase()}
+          </span>
+          <p className="text-xs text-stone-600 dark:text-stone-300 mt-0.5">
+            Alterna entre el estudio paso a paso por unidades, la chuleta visual resumida o el simulacro de examen global.
+          </p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-1.5 p-1 bg-stone-100 dark:bg-stone-800 rounded-xl">
+          <button
+            type="button"
+            onClick={() => {
+              setShowMathInteractiveModule(false);
+              setStudyViewMode('UNIT_STUDY');
+            }}
+            className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold transition-colors ${
+              !showMathInteractiveModule && studyViewMode === 'UNIT_STUDY'
+                ? 'bg-white dark:bg-stone-900 text-stone-900 dark:text-white shadow-2xs'
+                : 'text-stone-600 dark:text-stone-300 hover:text-stone-900'
+            }`}
+          >
+            <BookOpen className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+            <span>Estudio por Unidades ({currentSubject.units.length})</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setShowMathInteractiveModule(false);
+              setStudyViewMode('CHEAT_SHEET');
+            }}
+            className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold transition-colors ${
+              !showMathInteractiveModule && studyViewMode === 'CHEAT_SHEET'
+                ? 'bg-white dark:bg-stone-900 text-stone-900 dark:text-white shadow-2xs'
+                : 'text-stone-600 dark:text-stone-300 hover:text-stone-900'
+            }`}
+          >
+            <Layers className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+            <span>Chuleta Visual y Esquemas Globales</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setShowMathInteractiveModule(false);
+              setStudyViewMode('SUBJECT_EXAM');
+            }}
+            className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold transition-colors ${
+              !showMathInteractiveModule && studyViewMode === 'SUBJECT_EXAM'
+                ? 'bg-white dark:bg-stone-900 text-stone-900 dark:text-white shadow-2xs'
+                : 'text-stone-600 dark:text-stone-300 hover:text-stone-900'
+            }`}
+          >
+            <GraduationCap className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+            <span>Simulacro de Examen ({subjectExamQuestions.length} Preguntas)</span>
+          </button>
         </div>
       </div>
 
@@ -436,10 +586,10 @@ export const CurriculumAndModules: React.FC<CurriculumAndModulesProps> = ({
           </div>
 
           {/* If Mathematics is selected, show toggle for the 3-Lesson Interactive Module */}
-          {currentSubject.id === 'subj-mat' && (
+          {(currentSubject.id === 'subj-mat' || currentSubject.shortCode.startsWith('MAT')) && (
             <div className="p-3.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 space-y-2">
               <div className="text-xs font-bold text-amber-900 dark:text-amber-200">
-                Módulo Especial TDAH 1º ESO (3 Lecciones de 12-15 min)
+                Laboratorio Matemático Interactivo TDAH (3 Lecciones Guiadas)
               </div>
               <button
                 type="button"
@@ -447,8 +597,8 @@ export const CurriculumAndModules: React.FC<CurriculumAndModulesProps> = ({
                 className="w-full py-2 px-3 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold transition-colors"
               >
                 {showMathInteractiveModule
-                  ? 'Volver a las 6 Unidades de Matemáticas'
-                  : 'Abrir Módulo Interactivo (3 Lecciones) →'}
+                  ? `Volver a las ${currentSubject.units.length} Unidades de Matemáticas`
+                  : 'Abrir Laboratorio Interactivo (3 Lecciones) →'}
               </button>
             </div>
           )}
@@ -458,14 +608,19 @@ export const CurriculumAndModules: React.FC<CurriculumAndModulesProps> = ({
               Unidades Didácticas ({currentSubject.units.length}):
             </p>
             {currentSubject.units.map((unit) => {
-              const isCurrent = !showMathInteractiveModule && unit.id === currentUnit.id;
+              const isCurrent =
+                !showMathInteractiveModule &&
+                studyViewMode === 'UNIT_STUDY' &&
+                unit.id === currentUnit.id;
               const isDone = Boolean(completedUnits[unit.id]);
               return (
                 <button
                   key={unit.id}
                   type="button"
                   onClick={() => {
+                    stopSpeaking();
                     setShowMathInteractiveModule(false);
+                    setStudyViewMode('UNIT_STUDY');
                     setSelectedUnitId(unit.id);
                   }}
                   className={`w-full text-left p-3.5 rounded-xl border transition-all ${
@@ -476,7 +631,7 @@ export const CurriculumAndModules: React.FC<CurriculumAndModulesProps> = ({
                 >
                   <div className="flex items-center justify-between text-xs font-mono text-stone-500 dark:text-stone-400 tabular-nums">
                     <span>UNIDAD 0{unit.unitNumber}</span>
-                    <span>
+                    <span className={isDone ? 'text-emerald-700 dark:text-emerald-400 font-bold' : ''}>
                       {isDone ? '✓ COMPLETADA' : `${unit.durationMin} min · +${unit.studyPoints} PE`}
                     </span>
                   </div>
@@ -489,145 +644,9 @@ export const CurriculumAndModules: React.FC<CurriculumAndModulesProps> = ({
           </div>
         </div>
 
-        {/* Right Content Area (8 cols): Either Selected Unit OR 3-Lesson Math Module */}
+        {/* Right Content Area (8 cols): Unit Study OR Cheat Sheet OR Subject Exam OR Math Module */}
         <div className="lg:col-span-8">
-          {!showMathInteractiveModule ? (
-            <div className="border border-stone-200 dark:border-stone-800 rounded-xl bg-white dark:bg-stone-900 p-6 space-y-6">
-              <div className="flex flex-wrap items-start justify-between gap-4 pb-4 border-b border-stone-200 dark:border-stone-800">
-                <div>
-                  <span className="text-xs font-mono text-amber-700 dark:text-amber-400">
-                    {currentSubject.name.toUpperCase()} · UNIDAD 0{currentUnit.unitNumber} · {currentUnit.durationMin} MIN
-                  </span>
-                  <h3 className="text-xl font-bold text-stone-900 dark:text-white mt-1">
-                    {currentUnit.title}
-                  </h3>
-                </div>
-                <div className="text-xs font-mono tabular-nums text-stone-600 dark:text-stone-300">
-                  Recompensa: <strong>+{currentUnit.studyPoints} PE</strong> ·{' '}
-                  <strong>+{calculatedBreakMinForUnit} min Juego</strong> ({currentUnit.durationMin}m × {studyRatioX})
-                </div>
-              </div>
-
-              <p className="text-sm text-stone-700 dark:text-stone-200 leading-relaxed">
-                {currentUnit.summary}
-              </p>
-
-              <div className="text-xs text-stone-600 dark:text-stone-300">
-                <strong className="text-stone-900 dark:text-white">Conceptos clave de la unidad: </strong>
-                {currentUnit.keyConcepts.map((kc, idx) => (
-                  <React.Fragment key={kc}>
-                    {idx > 0 && <span aria-hidden="true"> · </span>}
-                    <span>{kc}</span>
-                  </React.Fragment>
-                ))}
-              </div>
-
-              {/* Visual Scheme Blocks */}
-              <div className="space-y-3">
-                <h4 className="text-sm font-bold text-stone-900 dark:text-white">
-                  Esquema de Estudio Directo y Sin Distracciones
-                </h4>
-                <div className="grid grid-cols-1 gap-3">
-                  {currentUnit.visualScheme.map((scheme, idx) => (
-                    <div
-                      key={idx}
-                      className="p-4 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50/70 dark:bg-stone-800/40"
-                    >
-                      <h5 className="text-xs font-bold text-amber-800 dark:text-amber-300">
-                        {scheme.heading}
-                      </h5>
-                      <p className="text-xs text-stone-700 dark:text-stone-200 mt-1 leading-relaxed">
-                        {scheme.detail}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Practical Case */}
-              <div className="p-4 rounded-xl border border-stone-200 dark:border-stone-800 bg-amber-50/40 dark:bg-amber-950/20 text-xs text-stone-800 dark:text-stone-200">
-                <strong>Ejemplo Práctico Resuelto: </strong>
-                {currentUnit.practicalExample}
-              </div>
-
-              {/* Quick Self-Check Question */}
-              {currentUnit.quickQuiz.map((qq) => {
-                const chosen = unitQuizAnswers[qq.id];
-                return (
-                  <div
-                    key={qq.id}
-                    className="p-5 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50/40 dark:bg-stone-800/30 space-y-3"
-                  >
-                    <div className="text-xs font-mono text-stone-500 dark:text-stone-400">
-                      AUTOEVALUACIÓN DE LA UNIDAD
-                    </div>
-                    <h5 className="text-sm font-bold text-stone-900 dark:text-white">
-                      {qq.question}
-                    </h5>
-                    <div className="space-y-2">
-                      {qq.options.map((optionText, oIdx) => {
-                        const isPicked = chosen === oIdx;
-                        const isRight = qq.correctIndex === oIdx;
-                        return (
-                          <button
-                            key={oIdx}
-                            type="button"
-                            onClick={() => {
-                              setUnitQuizAnswers((prev) => ({ ...prev, [qq.id]: oIdx }));
-                              soundFX.playStepComplete();
-                            }}
-                            className={`w-full text-left px-4 py-2.5 rounded-lg border text-xs transition-all flex items-center justify-between ${
-                              isPicked
-                                ? isRight
-                                  ? 'border-emerald-600 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-900 dark:text-emerald-200 font-semibold'
-                                  : 'border-rose-500 bg-rose-50 dark:bg-rose-950/40 text-rose-900 dark:text-rose-200'
-                                : 'border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-800 dark:text-stone-200'
-                            }`}
-                          >
-                            <span>{optionText}</span>
-                            {isPicked && (
-                              <span className="font-mono">
-                                {isRight ? '✓ Correcto' : '✗ Revisa el esquema'}
-                              </span>
-                            )}
-                          </button>
-                        );
-                      })}
-                    </div>
-                    {chosen !== undefined && (
-                      <p className="text-xs text-stone-600 dark:text-stone-300 pt-1">
-                        {qq.explanation}
-                      </p>
-                    )}
-                  </div>
-                );
-              })}
-
-              <div className="pt-2 flex items-center justify-between">
-                <button
-                  type="button"
-                  disabled={Boolean(completedUnits[currentUnit.id])}
-                  onClick={() =>
-                    onCompleteLessonReward(
-                      currentUnit.id,
-                      currentUnit.durationMin,
-                      currentUnit.studyPoints,
-                      `${currentSubject.name}: ${currentUnit.title}`
-                    )
-                  }
-                  className={`px-5 py-2.5 rounded-xl text-xs font-bold transition-colors ${
-                    completedUnits[currentUnit.id]
-                      ? 'bg-emerald-100 dark:bg-emerald-950/50 text-emerald-800 dark:text-emerald-300 cursor-default'
-                      : 'bg-amber-600 hover:bg-amber-700 text-white'
-                  }`}
-                >
-                  {completedUnits[currentUnit.id]
-                    ? '✓ Unidad Completada y Puntos Sumados'
-                    : `Marcar Unidad ${currentUnit.unitNumber} como Estudiada (+${currentUnit.studyPoints} PE y +${calculatedBreakMinForUnit} min Juego)`}
-                </button>
-              </div>
-            </div>
-          ) : (
+          {showMathInteractiveModule ? (
             /* 3-LESSON INTERACTIVE MATH MODULE */
             <div className="space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -670,7 +689,7 @@ export const CurriculumAndModules: React.FC<CurriculumAndModulesProps> = ({
                 <div className="flex flex-wrap items-start justify-between gap-4 pb-4 border-b border-stone-200 dark:border-stone-800">
                   <div>
                     <span className="text-xs font-mono text-stone-500 dark:text-stone-400">
-                      MÓDULO 1 MATEMÁTICAS 1º ESO · DURACIÓN: {currentLesson.durationMin} MIN
+                      MÓDULO INTERACTIVO MATEMÁTICAS · DURACIÓN: {currentLesson.durationMin} MIN
                     </span>
                     <h3 className="text-xl font-bold text-stone-900 dark:text-white mt-1">
                       {currentLesson.title}
@@ -861,6 +880,500 @@ export const CurriculumAndModules: React.FC<CurriculumAndModulesProps> = ({
                     )}
                   </div>
                 </div>
+              </div>
+            </div>
+          ) : studyViewMode === 'CHEAT_SHEET' ? (
+            /* MODE 2: CHULETA VISUAL Y RESUMEN GLOBAL DE TODA LA ASIGNATURA */
+            <div className="border border-stone-200 dark:border-stone-800 rounded-xl bg-white dark:bg-stone-900 p-6 space-y-6">
+              <div className="flex flex-wrap items-start justify-between gap-4 pb-4 border-b border-stone-200 dark:border-stone-800">
+                <div>
+                  <span className="text-xs font-mono text-amber-700 dark:text-amber-400">
+                    CHULETA VISUAL COMPLETA · {currentSubject.name.toUpperCase()} ({courseMeta.shortLabel})
+                  </span>
+                  <h3 className="text-xl font-bold text-stone-900 dark:text-white mt-1">
+                    Resumen Global de las {currentSubject.units.length} Unidades para Repaso Rápido antes del Examen
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setStudyViewMode('SUBJECT_EXAM')}
+                  className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold transition-colors"
+                >
+                  Hacer Simulacro de Examen →
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                {currentSubject.units.map((u) => {
+                  const enriched = getEnrichedUnitData(u, currentSubject.name);
+                  return (
+                    <div
+                      key={u.id}
+                      className="p-5 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50/60 dark:bg-stone-800/30 space-y-3"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <h4 className="text-sm font-bold text-stone-900 dark:text-white">
+                          Unidad 0{u.unitNumber}: {u.title}
+                        </h4>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedUnitId(u.id);
+                            setStudyViewMode('UNIT_STUDY');
+                          }}
+                          className="text-xs font-semibold text-amber-700 dark:text-amber-400 hover:underline"
+                        >
+                          Estudiar unidad a fondo →
+                        </button>
+                      </div>
+
+                      <p className="text-xs text-stone-700 dark:text-stone-200 leading-relaxed">
+                        {u.summary}
+                      </p>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                        {u.visualScheme.map((sch, idx) => (
+                          <div
+                            key={idx}
+                            className="p-3 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900"
+                          >
+                            <div className="text-xs font-bold text-amber-800 dark:text-amber-300">
+                              {sch.heading}
+                            </div>
+                            <p className="text-xs text-stone-600 dark:text-stone-300 mt-0.5">
+                              {sch.detail}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="flex flex-wrap items-center justify-between gap-2 pt-1 text-xs">
+                        <span className="text-stone-600 dark:text-stone-300">
+                          <strong>Caso clave:</strong> {u.practicalExample}
+                        </span>
+                        <span className="font-mono text-rose-700 dark:text-rose-300">
+                          ⚠️ {enriched.examTraps[0]}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ) : studyViewMode === 'SUBJECT_EXAM' ? (
+            /* MODE 3: SIMULACRO DE EXAMEN GLOBAL DE LA ASIGNATURA */
+            <div className="border border-stone-200 dark:border-stone-800 rounded-xl bg-white dark:bg-stone-900 p-6 space-y-6">
+              <div className="flex flex-wrap items-start justify-between gap-4 pb-4 border-b border-stone-200 dark:border-stone-800">
+                <div>
+                  <span className="text-xs font-mono text-amber-700 dark:text-amber-400">
+                    SIMULACRO DE EXAMEN OFICIAL · {currentSubject.name.toUpperCase()}
+                  </span>
+                  <h3 className="text-xl font-bold text-stone-900 dark:text-white mt-1">
+                    Prueba Global de Evaluación ({subjectExamQuestions.length} Preguntas de Todas las Unidades)
+                  </h3>
+                  <p className="text-xs text-stone-600 dark:text-stone-300 mt-1">
+                    Responde sin prisa aplicando la técnica TDAH de descartar primero las opciones imposibles.
+                  </p>
+                </div>
+
+                <div className="text-right font-mono text-xs">
+                  <div className="font-bold text-amber-700 dark:text-amber-400">
+                    Recompensa: +250 PE · +{Math.round(25 * studyRatioX)} min Juego
+                  </div>
+                  {isSubjectExamSubmitted && (
+                    <div className="text-emerald-700 dark:text-emerald-400 font-bold mt-1">
+                      Nota obtenida: {subjectExamCorrectCount} / {subjectExamQuestions.length} aciertos
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                {subjectExamQuestions.map((q, idx) => {
+                  const picked = examAnswers[q.id];
+                  return (
+                    <div
+                      key={q.id}
+                      className="p-4 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50/50 dark:bg-stone-800/30 space-y-2.5"
+                    >
+                      <div className="flex items-center justify-between text-[11px] font-mono text-stone-500 dark:text-stone-400">
+                        <span>
+                          PREGUNTA {idx + 1} DE {subjectExamQuestions.length}
+                        </span>
+                        <span>
+                          UNIDAD 0{q.unitNumber}: {q.unitTitle}
+                        </span>
+                      </div>
+                      <h4 className="text-xs sm:text-sm font-bold text-stone-900 dark:text-white">
+                        {q.question}
+                      </h4>
+                      <div className="space-y-1.5">
+                        {q.options.map((opt, oIdx) => {
+                          const isSelected = picked === oIdx;
+                          const isRight = q.correctIndex === oIdx;
+                          let style =
+                            'border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-800 dark:text-stone-200';
+                          if (isSelected) {
+                            style = isRight
+                              ? 'border-emerald-600 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-900 dark:text-emerald-200 font-semibold'
+                              : 'border-rose-500 bg-rose-50 dark:bg-rose-950/40 text-rose-900 dark:text-rose-200';
+                          }
+                          return (
+                            <button
+                              key={oIdx}
+                              type="button"
+                              onClick={() => {
+                                setExamAnswers((prev) => ({ ...prev, [q.id]: oIdx }));
+                                soundFX.playStepComplete();
+                              }}
+                              className={`w-full text-left px-3.5 py-2.5 rounded-lg border text-xs transition-all flex items-center justify-between ${style}`}
+                            >
+                              <span>{opt}</span>
+                              {isSelected && (
+                                <span className="font-mono">
+                                  {isRight ? '✓ Correcto' : '✗ Revisa la explicación'}
+                                </span>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      {picked !== undefined && (
+                        <p className="text-xs text-stone-600 dark:text-stone-300 pt-1">
+                          <strong>Explicación:</strong> {q.explanation}
+                        </p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="pt-2 flex flex-wrap items-center justify-between gap-4 border-t border-stone-200 dark:border-stone-800">
+                <button
+                  type="button"
+                  disabled={Boolean(completedUnits[subjectExamId])}
+                  onClick={() => {
+                    setExamSubmitted((prev) => ({ ...prev, [subjectExamId]: true }));
+                    onCompleteLessonReward(
+                      subjectExamId,
+                      25,
+                      250,
+                      `Simulacro Examen ${currentSubject.name}`
+                    );
+                  }}
+                  className={`px-5 py-2.5 rounded-xl text-xs font-bold transition-colors ${
+                    completedUnits[subjectExamId]
+                      ? 'bg-emerald-100 dark:bg-emerald-950/50 text-emerald-800 dark:text-emerald-300'
+                      : 'bg-amber-600 hover:bg-amber-700 text-white'
+                  }`}
+                >
+                  {completedUnits[subjectExamId]
+                    ? `✓ Simulacro Completado (${subjectExamCorrectCount}/${subjectExamQuestions.length} aciertos)`
+                    : `Entregar Simulacro de Examen (+250 PE y +${Math.round(25 * studyRatioX)} min Juego)`}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setExamAnswers({});
+                    setExamSubmitted((prev) => ({ ...prev, [subjectExamId]: false }));
+                  }}
+                  className="text-xs font-semibold text-stone-600 dark:text-stone-300 hover:underline"
+                >
+                  Reiniciar respuestas del simulacro
+                </button>
+              </div>
+            </div>
+          ) : (
+            /* MODE 1 (DEFAULT): DEEP MULTI-LAYERED UNIT STUDY */
+            <div className="border border-stone-200 dark:border-stone-800 rounded-xl bg-white dark:bg-stone-900 p-6 space-y-6">
+              <div className="flex flex-wrap items-start justify-between gap-4 pb-4 border-b border-stone-200 dark:border-stone-800">
+                <div>
+                  <span className="text-xs font-mono text-amber-700 dark:text-amber-400">
+                    {currentSubject.name.toUpperCase()} · UNIDAD 0{currentUnit.unitNumber} DE 0{currentSubject.units.length} · {currentUnit.durationMin} MIN
+                  </span>
+                  <h3 className="text-xl font-bold text-stone-900 dark:text-white mt-1">
+                    {currentUnit.title}
+                  </h3>
+                </div>
+                <div className="flex flex-wrap items-center gap-2.5">
+                  <button
+                    type="button"
+                    onClick={handleSpeakUnitAloud}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-colors cursor-pointer ${
+                      isSpeakingUnit
+                        ? 'border-rose-500 bg-rose-600 text-white'
+                        : 'border-amber-400 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/40 text-amber-900 dark:text-amber-200 hover:bg-amber-100'
+                    }`}
+                  >
+                    {isSpeakingUnit ? (
+                      <>
+                        <Square className="w-3.5 h-3.5 fill-current" />
+                        <span>Detener Lectura en Voz Alta</span>
+                      </>
+                    ) : (
+                      <>
+                        <Volume2 className="w-3.5 h-3.5" />
+                        <span>Escuchar Apuntes en Voz Alta</span>
+                      </>
+                    )}
+                  </button>
+                  <div className="text-xs font-mono tabular-nums text-stone-600 dark:text-stone-300">
+                    <strong>+{currentUnit.studyPoints} PE</strong> ·{' '}
+                    <strong>+{calculatedBreakMinForUnit} min Juego</strong>
+                  </div>
+                </div>
+              </div>
+
+              {/* Síntesis Directa */}
+              <div className="p-4 rounded-xl bg-stone-50 dark:bg-stone-800/50 border border-stone-200 dark:border-stone-800 space-y-2">
+                <div className="text-xs font-mono uppercase text-amber-700 dark:text-amber-400 font-semibold">
+                  1. Idea Esencial de la Unidad
+                </div>
+                <p className="text-sm text-stone-800 dark:text-stone-100 leading-relaxed font-medium">
+                  {currentUnit.summary}
+                </p>
+                <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                  {currentUnit.keyConcepts.map((kc) => (
+                    <span
+                      key={kc}
+                      className="px-2.5 py-1 rounded-md bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-700 text-xs font-semibold text-stone-800 dark:text-stone-200"
+                    >
+                      {kc}
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              {/* Desarrollo Teórico Estructurado por Bloques */}
+              <div className="space-y-3">
+                <h4 className="text-sm font-bold text-stone-900 dark:text-white flex items-center gap-2">
+                  <FileText className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                  <span>2. Desarrollo Teórico Paso a Paso (Adaptado para Lectura Ágil TDAH)</span>
+                </h4>
+                <div className="grid grid-cols-1 gap-3">
+                  {enrichedUnit.theoryBlocks.map((block, bIdx) => (
+                    <div
+                      key={bIdx}
+                      className="p-4 rounded-xl border border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900 space-y-1.5"
+                    >
+                      <h5 className="text-xs font-bold text-stone-900 dark:text-white">
+                        {block.blockTitle}
+                      </h5>
+                      <p className="text-xs text-stone-700 dark:text-stone-300 leading-relaxed">
+                        {block.content}
+                      </p>
+                      {block.highlightFormulaOrRule && (
+                        <p className="text-xs font-semibold text-amber-800 dark:text-amber-300 pt-1">
+                          ★ Recuerda: {block.highlightFormulaOrRule}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Visual Scheme Blocks */}
+              <div className="space-y-3">
+                <h4 className="text-sm font-bold text-stone-900 dark:text-white">
+                  3. Esquema Visual y Reglas Mnemotécnicas
+                </h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {currentUnit.visualScheme.map((scheme, idx) => (
+                    <div
+                      key={idx}
+                      className="p-4 rounded-xl border border-amber-300/80 dark:border-amber-800/70 bg-amber-50/50 dark:bg-amber-950/20"
+                    >
+                      <h5 className="text-xs font-bold text-amber-900 dark:text-amber-300">
+                        {scheme.heading}
+                      </h5>
+                      <p className="text-xs text-stone-800 dark:text-stone-200 mt-1.5 leading-relaxed">
+                        {scheme.detail}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Glosario de Términos Clave + Alertas de Examen */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="p-4 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50/50 dark:bg-stone-800/30 space-y-2.5">
+                  <h4 className="text-xs font-bold uppercase font-mono text-stone-700 dark:text-stone-300">
+                    4. Vocabulario Clave de Examen
+                  </h4>
+                  <div className="space-y-2">
+                    {enrichedUnit.glossary.map((g, gIdx) => (
+                      <div key={gIdx} className="text-xs">
+                        <strong className="text-stone-900 dark:text-white">{g.term}: </strong>
+                        <span className="text-stone-600 dark:text-stone-300">{g.definition}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="p-4 rounded-xl border border-rose-200 dark:border-rose-900/60 bg-rose-50/40 dark:bg-rose-950/20 space-y-2.5">
+                  <h4 className="text-xs font-bold uppercase font-mono text-rose-800 dark:text-rose-300 flex items-center gap-1.5">
+                    <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                    <span>5. Cuidado: Errores Frecuentes en Examen</span>
+                  </h4>
+                  <ul className="space-y-1.5 text-xs text-stone-700 dark:text-stone-200">
+                    {enrichedUnit.examTraps.map((trap, tIdx) => (
+                      <li key={tIdx} className="leading-relaxed">
+                        • {trap}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+
+              {/* Practical Case */}
+              <div className="p-4 rounded-xl border border-stone-200 dark:border-stone-800 bg-emerald-50/40 dark:bg-emerald-950/20 text-xs text-stone-800 dark:text-stone-200 space-y-1">
+                <div className="font-mono uppercase text-[11px] font-bold text-emerald-800 dark:text-emerald-400">
+                  6. Caso Práctico y Ejercicio Resuelto (IES Clot del Moro)
+                </div>
+                <p className="leading-relaxed">{currentUnit.practicalExample}</p>
+              </div>
+
+              {/* Interactive Study Checklist */}
+              <div className="p-4 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50/50 dark:bg-stone-800/30 space-y-2.5">
+                <div className="text-xs font-bold text-stone-900 dark:text-white">
+                  7. Lista de Verificación antes de pasar al Test (Marca conforme avances):
+                </div>
+                <div className="grid grid-cols-1 gap-2">
+                  {enrichedUnit.studyChecklist.map((itemText, cIdx) => {
+                    const checkKey = `${currentUnit.id}-chk-${cIdx}`;
+                    const isChecked = Boolean(checkedChecklistItems[checkKey]);
+                    return (
+                      <button
+                        key={checkKey}
+                        type="button"
+                        onClick={() => {
+                          setCheckedChecklistItems((prev) => ({
+                            ...prev,
+                            [checkKey]: !prev[checkKey],
+                          }));
+                          soundFX.playStepComplete();
+                        }}
+                        className={`text-left px-3.5 py-2 rounded-lg border text-xs flex items-center gap-2.5 transition-colors ${
+                          isChecked
+                            ? 'border-emerald-500/50 bg-emerald-50/40 dark:bg-emerald-950/20 text-stone-500 dark:text-stone-400 line-through'
+                            : 'border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-800 dark:text-stone-200'
+                        }`}
+                      >
+                        {isChecked ? (
+                          <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                        ) : (
+                          <Circle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                        )}
+                        <span>{itemText}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* 3-Question Self-Check Quiz */}
+              <div className="space-y-3 pt-2 border-t border-stone-200 dark:border-stone-800">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-sm font-bold text-stone-900 dark:text-white">
+                    8. Autoevaluación de la Unidad ({currentUnitExtendedQuiz.length} Preguntas de Repaso)
+                  </h4>
+                  <span className="text-xs font-mono text-stone-500 dark:text-stone-400">
+                    Responde para comprobar tu dominio
+                  </span>
+                </div>
+
+                {currentUnitExtendedQuiz.map((qq, qIndex) => {
+                  const chosen = unitQuizAnswers[qq.id];
+                  return (
+                    <div
+                      key={qq.id}
+                      className="p-4 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50/40 dark:bg-stone-800/30 space-y-2.5"
+                    >
+                      <h5 className="text-xs sm:text-sm font-bold text-stone-900 dark:text-white">
+                        Pregunta {qIndex + 1}: {qq.question}
+                      </h5>
+                      <div className="space-y-1.5">
+                        {qq.options.map((optionText, oIdx) => {
+                          const isPicked = chosen === oIdx;
+                          const isRight = qq.correctIndex === oIdx;
+                          return (
+                            <button
+                              key={oIdx}
+                              type="button"
+                              onClick={() => {
+                                setUnitQuizAnswers((prev) => ({ ...prev, [qq.id]: oIdx }));
+                                soundFX.playStepComplete();
+                              }}
+                              className={`w-full text-left px-4 py-2.5 rounded-lg border text-xs transition-all flex items-center justify-between ${
+                                isPicked
+                                  ? isRight
+                                    ? 'border-emerald-600 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-900 dark:text-emerald-200 font-semibold'
+                                    : 'border-rose-500 bg-rose-50 dark:bg-rose-950/40 text-rose-900 dark:text-rose-200'
+                                  : 'border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-800 dark:text-stone-200'
+                              }`}
+                            >
+                              <span>{optionText}</span>
+                              {isPicked && (
+                                <span className="font-mono">
+                                  {isRight ? '✓ Correcto' : '✗ Revisa el esquema'}
+                                </span>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      {chosen !== undefined && (
+                        <p className="text-xs text-stone-600 dark:text-stone-300 pt-1">
+                          {qq.explanation}
+                        </p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="pt-2 flex flex-wrap items-center justify-between gap-3">
+                <button
+                  type="button"
+                  disabled={Boolean(completedUnits[currentUnit.id])}
+                  onClick={() =>
+                    onCompleteLessonReward(
+                      currentUnit.id,
+                      currentUnit.durationMin,
+                      currentUnit.studyPoints,
+                      `${currentSubject.name}: ${currentUnit.title}`
+                    )
+                  }
+                  className={`px-5 py-2.5 rounded-xl text-xs font-bold transition-colors ${
+                    completedUnits[currentUnit.id]
+                      ? 'bg-emerald-100 dark:bg-emerald-950/50 text-emerald-800 dark:text-emerald-300 cursor-default'
+                      : 'bg-amber-600 hover:bg-amber-700 text-white'
+                  }`}
+                >
+                  {completedUnits[currentUnit.id]
+                    ? '✓ Unidad Completada y Puntos Sumados'
+                    : `Marcar Unidad ${currentUnit.unitNumber} como Estudiada (+${currentUnit.studyPoints} PE y +${calculatedBreakMinForUnit} min Juego)`}
+                </button>
+
+                {currentUnit.unitNumber < currentSubject.units.length && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const nextU = currentSubject.units.find(
+                        (u) => u.unitNumber === currentUnit.unitNumber + 1
+                      );
+                      if (nextU) {
+                        stopSpeaking();
+                        setSelectedUnitId(nextU.id);
+                      }
+                    }}
+                    className="flex items-center gap-1 px-4 py-2 rounded-xl border border-stone-300 dark:border-stone-700 text-xs font-semibold text-stone-800 dark:text-stone-200 hover:bg-stone-100 dark:hover:bg-stone-800"
+                  >
+                    <span>Siguiente Unidad (0{currentUnit.unitNumber + 1})</span>
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                )}
               </div>
             </div>
           )}

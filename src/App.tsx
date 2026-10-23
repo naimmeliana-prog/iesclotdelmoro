@@ -21,6 +21,11 @@ import {
   syncGradesWithCurriculum,
 } from './data/courseCurricula';
 import {
+  QUICK_TASK_TEMPLATES,
+  syncCornellWithDefaultCatalog,
+  syncTasksWithDefaultCatalog,
+} from './data/expandedStudyContent';
+import {
   ActiveTab,
   AnimeWorldId,
   AppNotification,
@@ -160,10 +165,15 @@ export default function App() {
     return saved ? JSON.parse(saved) : {};
   });
 
-  // Tasks start empty []
+  // Tasks synced with default course catalog (all micro-steps start uncompleted)
   const [tasks, setTasks] = useState<SchoolTask[]>(() => {
-    const saved = localStorage.getItem('clotfocus_tasks_v4');
-    return saved ? JSON.parse(saved) : INITIAL_TASKS;
+    try {
+      const saved = localStorage.getItem('clotfocus_tasks_v4');
+      const parsed = saved ? JSON.parse(saved) : [];
+      return syncTasksWithDefaultCatalog(parsed);
+    } catch {
+      return INITIAL_TASKS;
+    }
   });
 
   // Virtual shop items start locked
@@ -211,8 +221,13 @@ export default function App() {
   });
 
   const [cornellNotes, setCornellNotes] = useState<CornellNote[]>(() => {
-    const saved = localStorage.getItem('clotfocus_cornell_v4');
-    return saved ? JSON.parse(saved) : INITIAL_CORNELL_NOTES;
+    try {
+      const saved = localStorage.getItem('clotfocus_cornell_v4');
+      const parsed = saved ? JSON.parse(saved) : [];
+      return syncCornellWithDefaultCatalog(parsed);
+    } catch {
+      return INITIAL_CORNELL_NOTES;
+    }
   });
 
   const [teacherAdaptations, setTeacherAdaptations] = useState<TeacherAdaptationGuide[]>(() => {
@@ -1574,13 +1589,69 @@ export default function App() {
                   </form>
                 )}
 
+                {/* 1-Click Quick Task Templates Bar */}
+                <div className="p-4 rounded-xl border border-amber-300/80 dark:border-amber-800/70 bg-amber-50/50 dark:bg-amber-950/20 space-y-2.5">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-xs font-bold text-stone-900 dark:text-white">
+                      Catálogo de Plantillas Rápidas de Estudio y Exámenes (Añadir a {courseMeta.shortLabel} en 1 clic):
+                    </span>
+                    <span className="text-[11px] font-mono text-amber-800 dark:text-amber-300">
+                      Desglosa exámenes o deberes en 4 micro-pasos guiados
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+                    {QUICK_TASK_TEMPLATES.map((tmpl) => (
+                      <button
+                        key={tmpl.id}
+                        type="button"
+                        onClick={() => {
+                          const nowId = Date.now();
+                          const totalMin = tmpl.steps.reduce((acc, s) => acc + s.durationMin, 0);
+                          const created: SchoolTask = {
+                            id: `task-tmpl-${nowId}`,
+                            title: `${tmpl.label} — ${newTaskSubject}`,
+                            subject: newTaskSubject,
+                            course: selectedCourse,
+                            dueDate: 'Esta semana',
+                            dueTime: '18:00',
+                            priority: 'ALTA',
+                            sourcePlatform: 'Manual',
+                            microSteps: tmpl.steps.map((st, idx) => ({
+                              id: `st-${nowId}-${idx + 1}`,
+                              title: st.title,
+                              durationMin: st.durationMin,
+                              completed: false,
+                            })),
+                            studyDurationMin: totalMin,
+                            rewardStudyPoints: tmpl.rewardStudyPoints,
+                            teacherTip: tmpl.teacherTip,
+                          };
+                          setTasks((prev) => [created, ...prev]);
+                          soundFX.playStepComplete();
+                          triggerToast(
+                            `Plantilla "${tmpl.label}" añadida para ${newTaskSubject} (${courseMeta.shortLabel}).`
+                          );
+                        }}
+                        className="text-left p-3 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 hover:border-amber-500 transition-colors flex flex-col justify-between gap-1.5"
+                      >
+                        <div className="text-xs font-bold text-stone-900 dark:text-white">
+                          + {tmpl.label}
+                        </div>
+                        <div className="text-[11px] font-mono text-amber-700 dark:text-amber-400">
+                          {tmpl.steps.length} micro-pasos · +{tmpl.rewardStudyPoints} PE
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
                 {displayedTasks.length === 0 ? (
                   <div className="p-8 rounded-xl border border-dashed border-stone-300 dark:border-stone-700 text-center space-y-3">
                     <p className="text-sm font-bold text-stone-900 dark:text-white">
-                      0 tareas registradas en {courseMeta.shortLabel}
+                      No hay tareas en este filtro para {courseMeta.shortLabel}
                     </p>
                     <p className="text-xs text-stone-500 dark:text-stone-400 max-w-md mx-auto">
-                      No hemos inventado tareas falsas. Pulsa <strong>"Nueva Tarea Dividida"</strong> arriba para crear tu primera tarea real o sincroniza tu cuenta de Aules GVA / Google Classroom.
+                      Cambia el filtro a <strong>"Todas"</strong> o pulsa cualquiera de las plantillas superiores para añadir una nueva tarea dividida en micro-pasos.
                     </p>
                   </div>
                 ) : (
@@ -1610,6 +1681,11 @@ export default function App() {
                               <h3 className="text-base font-bold text-stone-900 dark:text-white mt-1">
                                 {task.title}
                               </h3>
+                              {task.teacherTip && (
+                                <p className="text-xs text-amber-800 dark:text-amber-300 mt-1">
+                                  💡 <strong>Consejo TDAH Docente:</strong> {task.teacherTip}
+                                </p>
+                              )}
                             </div>
 
                             <div className="text-xs font-mono tabular-nums text-right">

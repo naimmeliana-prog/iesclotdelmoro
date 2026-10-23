@@ -16,6 +16,7 @@ import {
   VirtualShopItem,
   WeeklyStudyMetric,
 } from '../types';
+import { COURSE_DEFAULT_TASKS, PRELOADED_CORNELL_NOTES } from './expandedStudyContent';
 
 export const COURSE_METADATA: Record<
   CourseGrade,
@@ -1448,7 +1449,7 @@ export const LMS_TECHNICAL_ARCHITECTURE: LmsTechnicalStep[] = [
 // ============================================================================
 // ESTADO INICIAL A CERO (SIN VALORES NI NOTAS NI TAREAS INVENTADAS)
 // ============================================================================
-export const INITIAL_TASKS: SchoolTask[] = [];
+export const INITIAL_TASKS: SchoolTask[] = COURSE_DEFAULT_TASKS;
 
 export const INITIAL_FLASHCARDS: FlashcardItem[] = [
   {
@@ -1707,4 +1708,4 @@ export const TEACHER_ADAPTATIONS: TeacherAdaptationGuide[] = [
 
 export const INITIAL_NOTIFICATIONS: AppNotification[] = [];
 
-export const INITIAL_CORNELL_NOTES: CornellNote[] = [];
+export const INITIAL_CORNELL_NOTES: CornellNote[] = PRELOADED_CORNELL_NOTES;

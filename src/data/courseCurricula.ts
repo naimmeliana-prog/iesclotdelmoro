@@ -1,5 +1,9 @@
 import { CourseGrade, FlashcardItem, SubjectGradeMetric, SyllabusSubject } from '../types';
 import { FULL_SYLLABUS_SUBJECTS, INITIAL_FLASHCARDS } from './clotDelMoroData';
+import {
+  enrichCourseSubjectsWithExtraContent,
+  EXTRA_FLASHCARDS_BY_COURSE,
+} from './expandedStudyContent';
 
 interface CourseBlueprint {
   courseLabel: string;
@@ -1581,7 +1585,7 @@ export function getSubjectsForCourse(
   course: CourseGrade,
   customUnits: CustomCurriculumUnit[] = []
 ): SyllabusSubject[] {
-  const baseSubjects: SyllabusSubject[] =
+  const rawBaseSubjects: SyllabusSubject[] =
     course === '1ESO'
       ? FULL_SYLLABUS_SUBJECTS
       : COURSE_BLUEPRINTS[course].subjects.map((s) => ({
@@ -1612,6 +1616,8 @@ export function getSubjectsForCourse(
             ],
           })),
         }));
+
+  const baseSubjects = enrichCourseSubjectsWithExtraContent(course, rawBaseSubjects);
 
   const courseCustom = customUnits.filter((cu) => cu.course === course);
   if (courseCustom.length === 0) {
@@ -1665,19 +1671,54 @@ export function getSubjectsForCourse(
 }
 
 export function getFlashcardsForCourse(course: CourseGrade): FlashcardItem[] {
-  if (course === '1ESO') {
-    return INITIAL_FLASHCARDS;
-  }
-  const bp = COURSE_BLUEPRINTS[course];
-  return bp.flashcards.map((f, idx) => ({
-    id: `fc-${course.toLowerCase()}-${idx + 1}`,
-    course,
-    subject: f.subject,
-    question: f.question,
-    answer: f.answer,
-    mnemonicHint: f.mnemonicHint,
-    mastered: false,
-  }));
+  const baseCards: FlashcardItem[] =
+    course === '1ESO'
+      ? INITIAL_FLASHCARDS
+      : COURSE_BLUEPRINTS[course].flashcards.map((f, idx) => ({
+          id: `fc-${course.toLowerCase()}-${idx + 1}`,
+          course,
+          subject: f.subject,
+          question: f.question,
+          answer: f.answer,
+          mnemonicHint: f.mnemonicHint,
+          mastered: false,
+        }));
+
+  const extraCards = EXTRA_FLASHCARDS_BY_COURSE.filter((c) => c.course === course);
+
+  // Also generate 1 flashcard per curriculum unit so every subject has complete coverage
+  const unitCards: FlashcardItem[] = [];
+  const courseSubjects = getSubjectsForCourse(course);
+  courseSubjects.forEach((subj) => {
+    subj.units.forEach((unit) => {
+      const q = unit.quickQuiz[0];
+      if (!q) return;
+      const cardId = `fc-unit-${unit.id}`;
+      unitCards.push({
+        id: cardId,
+        course,
+        subject: subj.name,
+        question: q.question,
+        answer: `${q.options[q.correctIndex]}. (${q.explanation})`,
+        mnemonicHint: unit.visualScheme[0]
+          ? `${unit.visualScheme[0].heading}: ${unit.visualScheme[0].detail}`
+          : unit.summary,
+        mastered: false,
+      });
+    });
+  });
+
+  const combined = [...baseCards, ...extraCards];
+  unitCards.forEach((uc) => {
+    const duplicateQuestion = combined.some(
+      (existing) => existing.question.toLowerCase().trim() === uc.question.toLowerCase().trim()
+    );
+    if (!duplicateQuestion) {
+      combined.push(uc);
+    }
+  });
+
+  return combined;
 }
 
 export function getInitialGradesForCourse(
