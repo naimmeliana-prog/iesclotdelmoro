@@ -9,11 +9,14 @@ import {
   Flame,
   Gamepad2,
   Gauge,
+  Maximize2,
+  Minimize2,
   Pause,
   Play,
   RotateCcw,
   Shield,
   ShoppingBag,
+  Smartphone,
   Sparkles,
   Swords,
   Timer,
@@ -159,10 +162,39 @@ export const AnimeMiniGames: React.FC<AnimeMiniGamesProps> = ({
     floatingText: [],
   });
 
-  // Canvas & Input Refs for 60 FPS Real-Time Games (Genres 1, 2, 3, 4)
+  // Canvas, Container & Input Refs for 60 FPS Real-Time Games (Genres 1, 2, 3, 4)
+  const arcadeContainerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const keysRef = useRef<Record<string, boolean>>({});
   const animFrameRef = useRef<number | null>(null);
+  const [isTheatreFullscreen, setIsTheatreFullscreen] = useState<boolean>(false);
+
+  const toggleFullscreen = () => {
+    if (!document.fullscreenElement && !isTheatreFullscreen) {
+      if (arcadeContainerRef.current?.requestFullscreen) {
+        arcadeContainerRef.current.requestFullscreen().catch(() => {
+          setIsTheatreFullscreen(true);
+        });
+      } else {
+        setIsTheatreFullscreen(true);
+      }
+    } else {
+      if (document.fullscreenElement && document.exitFullscreen) {
+        document.exitFullscreen().catch(() => {});
+      }
+      setIsTheatreFullscreen(false);
+    }
+  };
+
+  useEffect(() => {
+    const handleFsChange = () => {
+      if (!document.fullscreenElement) {
+        setIsTheatreFullscreen(false);
+      }
+    };
+    document.addEventListener('fullscreenchange', handleFsChange);
+    return () => document.removeEventListener('fullscreenchange', handleFsChange);
+  }, []);
 
   // Switch genre resets back to Title Menu cleanly
   const handleSelectGenre = (genre: VideoGameGenre) => {
@@ -1605,7 +1637,7 @@ export const AnimeMiniGames: React.FC<AnimeMiniGamesProps> = ({
       {/* =====================================================================
           1. CONSOLA DE VIDEOJUEGOS ANIME 60 FPS (PLATAFORMAS, CARRERAS, RPG, TÁCTICO)
           ===================================================================== */}
-      <div className="border border-stone-200 dark:border-stone-800 rounded-xl bg-white dark:bg-stone-900 p-6 space-y-6">
+      <div className="border border-stone-200 dark:border-stone-800 rounded-xl bg-white dark:bg-stone-900 p-3 sm:p-6 space-y-5 sm:space-y-6">
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 pb-5 border-b border-stone-200 dark:border-stone-800">
           <div>
             <p className="text-xs text-stone-500 dark:text-stone-400">
@@ -1751,93 +1783,153 @@ export const AnimeMiniGames: React.FC<AnimeMiniGamesProps> = ({
         {/* ===================================================================
             VIDEO GAME VIEWPORT (CANVAS + HUD OVERLAY + TOUCH/KEYBOARD CONTROLS)
             =================================================================== */}
-        <div className="rounded-2xl overflow-hidden border-2 border-stone-800 bg-stone-950 text-white shadow-xl">
+        <div
+          ref={arcadeContainerRef}
+          className={
+            isTheatreFullscreen
+              ? 'fixed inset-0 z-50 bg-stone-950 p-2 sm:p-4 flex flex-col justify-between overflow-y-auto text-white'
+              : 'rounded-2xl overflow-hidden border-2 border-stone-800 bg-stone-950 text-white shadow-xl'
+          }
+        >
           {/* Top Arcade HUD Bar */}
-          <div className="px-5 py-3 bg-stone-900 border-b border-stone-800 flex flex-wrap items-center justify-between gap-4 text-xs font-mono tabular-nums">
-            <div className="flex items-center gap-3">
-              <span className="px-2.5 py-1 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 font-bold">
+          <div className="px-3 sm:px-5 py-2.5 sm:py-3 bg-stone-900 border-b border-stone-800 flex flex-wrap items-center justify-between gap-2 sm:gap-4 text-[11px] sm:text-xs font-mono tabular-nums">
+            <div className="flex items-center gap-2 sm:gap-3">
+              <span className="px-2 py-0.5 sm:px-2.5 sm:py-1 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 font-bold truncate max-w-[130px] sm:max-w-none">
                 {customMangaName.trim() || world.name}
               </span>
               <span className="text-stone-300 font-semibold">{hudLevelOrLap}</span>
-              <span className="hidden sm:inline text-stone-400">· {hudStatusText}</span>
+              <span className="hidden md:inline text-stone-400">· {hudStatusText}</span>
             </div>
 
-            <div className="flex flex-wrap items-center gap-4">
+            <div className="flex flex-wrap items-center gap-2 sm:gap-4">
               <span className="text-amber-400 font-bold">SCORE: {hudScore}</span>
               <span className="text-emerald-400 font-bold">
                 {activeGenre === 'RACING' ? `VEL: ${hudHp} KM/H` : `PS: ${hudHp}%`}
               </span>
-              <span className="text-sky-400 font-bold">
+              <span className="text-sky-400 font-bold hidden xs:inline sm:inline">
                 {activeGenre === 'RACING' ? `NITRO: ${hudEnergy}%` : `ENERGÍA: ${hudEnergy}%`}
               </span>
               <span className="flex items-center gap-1 text-stone-300">
                 <Timer className="w-3.5 h-3.5 text-amber-400" />
                 {formatTimer(breakCountdownSec)}
               </span>
+
+              {/* Mobile Fullscreen / Cinema Mode Toggle Button */}
+              <button
+                type="button"
+                onClick={toggleFullscreen}
+                title={isTheatreFullscreen ? 'Salir de pantalla completa' : 'Pantalla completa'}
+                className="px-2 py-1 rounded bg-stone-800 hover:bg-stone-700 text-stone-200 flex items-center gap-1 cursor-pointer transition-colors"
+              >
+                {isTheatreFullscreen ? (
+                  <>
+                    <Minimize2 className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">Salir</span>
+                  </>
+                ) : (
+                  <>
+                    <Maximize2 className="w-3.5 h-3.5 text-amber-400" />
+                    <span className="hidden sm:inline">Pantalla Completa</span>
+                  </>
+                )}
+              </button>
+
               {gameStage === 'PLAYING' && (
                 <button
                   type="button"
                   onClick={() => setGameStage('PAUSED')}
-                  className="px-2.5 py-1 rounded bg-stone-800 hover:bg-stone-700 text-stone-200 flex items-center gap-1"
+                  className="px-2 py-1 rounded bg-stone-800 hover:bg-stone-700 text-stone-200 flex items-center gap-1 cursor-pointer transition-colors"
                 >
-                  <Pause className="w-3 h-3" /> Pausa
+                  <Pause className="w-3 h-3" />
+                  <span className="hidden sm:inline">Pausa</span>
                 </button>
               )}
             </div>
           </div>
 
-          {/* Main Canvas Stage */}
-          <div className="relative w-full aspect-[16/9] max-h-[520px] bg-stone-950 flex items-center justify-center overflow-hidden">
+          {/* Quick Mobile Landscape Orientation Tip Banner */}
+          {!isTheatreFullscreen && (
+            <div className="sm:hidden px-3 py-1 bg-amber-500/10 border-b border-amber-500/20 text-[11px] font-mono text-amber-300 flex items-center justify-between">
+              <span className="flex items-center gap-1.5">
+                <Smartphone className="w-3.5 h-3.5 shrink-0" />
+                <span>Gira el móvil en horizontal o pulsa</span>
+              </span>
+              <button
+                type="button"
+                onClick={toggleFullscreen}
+                className="underline font-bold text-amber-200 hover:text-white ml-1 shrink-0"
+              >
+                ⛶ Pantalla Completa
+              </button>
+            </div>
+          )}
+
+          {/* Main Canvas Stage (Full Responsive Aspect Ratio Scaling) */}
+          <div
+            className={`relative w-full min-w-0 max-w-full aspect-[920/480] bg-stone-950 flex items-center justify-center overflow-hidden rounded-lg mx-auto ${
+              gameStage !== 'PLAYING' ? 'min-h-[290px] sm:min-h-0' : ''
+            }`}
+          >
             <canvas
               ref={canvasRef}
               width={920}
               height={480}
-              className="w-full h-full object-contain block"
+              className="w-full h-full min-w-0 max-w-full block select-none touch-none"
+              style={{
+                width: '100%',
+                height: '100%',
+                maxWidth: '100%',
+                maxHeight: '100%',
+                aspectRatio: '920 / 480',
+                display: 'block',
+                touchAction: 'none',
+                userSelect: 'none',
+              }}
             />
 
             {/* OVERLAY 1: TITLE MENU */}
             {gameStage === 'TITLE_MENU' && (
-              <div className="absolute inset-0 bg-stone-950/90 backdrop-blur-xs flex flex-col items-center justify-center p-6 text-center space-y-5">
-                <div className="px-3 py-1 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-300 text-xs font-mono font-semibold">
+              <div className="absolute inset-0 bg-stone-950/95 backdrop-blur-xs flex flex-col items-center justify-center p-3 sm:p-6 text-center space-y-2 sm:space-y-4 overflow-y-auto max-h-full">
+                <div className="px-2.5 py-0.5 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-300 text-[11px] font-mono font-semibold">
                   MOTOR GRÁFICO 60 FPS · {customMangaName.trim() || world.name}
                 </div>
 
-                <h3 className="text-2xl sm:text-3xl font-bold text-white max-w-xl">
+                <h3 className="text-lg sm:text-2xl md:text-3xl font-bold text-white max-w-xl">
                   {activeGenre === 'PLATFORMER' && 'Crónicas de Acción y Plataformas 2D'}
                   {activeGenre === 'RACING' && `Gran Prix Turbo 3D: ${palette.vehicleName}`}
                   {activeGenre === 'RPG_ADVENTURE' && 'Odisea RPG: Mazmorra y Jefes en Tiempo Real'}
                   {activeGenre === 'TACTICAL_RPG' && `Coliseo RPG por Turnos vs ${palette.bossName}`}
                 </h3>
 
-                <p className="text-xs sm:text-sm text-stone-300 max-w-xl leading-relaxed">
+                <p className="text-[11px] sm:text-xs md:text-sm text-stone-300 max-w-xl leading-relaxed hidden xs:block sm:block">
                   {activeGenre === 'PLATFORMER' &&
-                    `Corre y haz doble salto entre plataformas móviles, usa muelles de impulso, lanza ${palette.projectileName} con [J] o [Espacio] y alcanza el portal dimensional al final del nivel.`}
+                    `Corre y haz doble salto entre plataformas móviles, usa muelles de impulso, lanza ${palette.projectileName} y alcanza el portal dimensional al final del nivel.`}
                   {activeGenre === 'RACING' &&
-                    'Toma las curvas a más de 300 km/h con [A/D] o las flechas [←/→], recoge células de energía en el asfalto y pulsa [Espacio] para activar el Nitro Turbo.'}
+                    'Toma las curvas a más de 300 km/h, recoge células de energía en el asfalto y pulsa Nitro Turbo.'}
                   {activeGenre === 'RPG_ADVENTURE' &&
-                    `Explora el santuario en 2.5D con [WASD] o flechas, abre los 3 cofres legendarios, ataca con tu espada [Espacio/J] o desata la Nova Elemental [K] para vencer a ${palette.bossName}.`}
+                    `Explora el santuario en 2.5D, abre los 3 cofres legendarios, ataca con tu espada o desata la Nova Elemental para vencer a ${palette.bossName}.`}
                   {activeGenre === 'TACTICAL_RPG' &&
                     'Combate estratégico por turnos con animaciones cinemáticas, escudos de concentración y barra de límite al 100%.'}
                 </p>
 
-                <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+                <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-3 pt-1 sm:pt-2">
                   <button
                     type="button"
                     onClick={() => handleLaunchVideoGame(false)}
-                    className="px-6 py-3 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs sm:text-sm font-bold flex items-center gap-2 shadow-lg transition-all cursor-pointer"
+                    className="px-4 sm:px-6 py-2.5 sm:py-3 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs sm:text-sm font-bold flex items-center gap-2 shadow-lg transition-all cursor-pointer"
                   >
                     <Play className="w-4 h-4 fill-current" />
-                    Jugar Ahora (Modo Libre / Demo 60 FPS)
+                    Jugar Ahora (Modo Libre 60 FPS)
                   </button>
 
                   {breakMinutes > 0 && (
                     <button
                       type="button"
                       onClick={() => handleLaunchVideoGame(true)}
-                      className="px-5 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs sm:text-sm font-bold flex items-center gap-2 transition-all cursor-pointer"
+                      className="px-3.5 sm:px-5 py-2.5 sm:py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs sm:text-sm font-bold flex items-center gap-2 transition-all cursor-pointer"
                     >
                       <Sparkles className="w-4 h-4" />
-                      Usar 1 min de Recompensa ({breakMinutes} min disp.)
+                      Usar Recompensa ({breakMinutes} min)
                     </button>
                   )}
                 </div>
@@ -1846,20 +1938,20 @@ export const AnimeMiniGames: React.FC<AnimeMiniGamesProps> = ({
 
             {/* OVERLAY 2: PAUSED */}
             {gameStage === 'PAUSED' && (
-              <div className="absolute inset-0 bg-stone-950/85 backdrop-blur-xs flex flex-col items-center justify-center p-6 text-center space-y-4">
-                <h3 className="text-2xl font-bold text-white">Juego en Pausa</h3>
-                <div className="flex items-center gap-3">
+              <div className="absolute inset-0 bg-stone-950/90 backdrop-blur-xs flex flex-col items-center justify-center p-4 sm:p-6 text-center space-y-3 sm:space-y-4 overflow-y-auto max-h-full">
+                <h3 className="text-xl sm:text-2xl font-bold text-white">Juego en Pausa</h3>
+                <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-3">
                   <button
                     type="button"
                     onClick={() => setGameStage('PLAYING')}
-                    className="px-5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold"
+                    className="px-4 sm:px-5 py-2 sm:py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold"
                   >
                     Reanudar Partida
                   </button>
                   <button
                     type="button"
                     onClick={() => setGameStage('TITLE_MENU')}
-                    className="px-5 py-2.5 rounded-xl border border-stone-600 text-stone-200 text-xs font-semibold"
+                    className="px-4 sm:px-5 py-2 sm:py-2.5 rounded-xl border border-stone-600 text-stone-200 text-xs font-semibold"
                   >
                     Salir al Menú
                   </button>
@@ -1869,13 +1961,13 @@ export const AnimeMiniGames: React.FC<AnimeMiniGamesProps> = ({
 
             {/* OVERLAY 3: VICTORY / GAME OVER */}
             {(gameStage === 'VICTORY' || gameStage === 'GAME_OVER') && (
-              <div className="absolute inset-0 bg-stone-950/90 backdrop-blur-xs flex flex-col items-center justify-center p-6 text-center space-y-4">
+              <div className="absolute inset-0 bg-stone-950/90 backdrop-blur-xs flex flex-col items-center justify-center p-4 sm:p-6 text-center space-y-3 sm:space-y-4 overflow-y-auto max-h-full">
                 <Trophy
-                  className={`w-12 h-12 ${
+                  className={`w-10 sm:w-12 h-10 sm:h-12 ${
                     gameStage === 'VICTORY' ? 'text-amber-400' : 'text-rose-400'
                   }`}
                 />
-                <h3 className="text-2xl sm:text-3xl font-bold text-white">
+                <h3 className="text-xl sm:text-3xl font-bold text-white">
                   {gameStage === 'VICTORY'
                     ? '¡Misión Completada con Éxito!'
                     : '¡Has caído en combate!'}
@@ -1884,11 +1976,11 @@ export const AnimeMiniGames: React.FC<AnimeMiniGamesProps> = ({
                   Puntuación obtenida: <strong>{hudScore} PTS</strong> · Universo:{' '}
                   <strong>{customMangaName.trim() || world.name}</strong>
                 </p>
-                <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+                <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-3 pt-1">
                   <button
                     type="button"
                     onClick={() => handleLaunchVideoGame(false)}
-                    className="px-5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold flex items-center gap-1.5"
+                    className="px-4 sm:px-5 py-2 sm:py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold flex items-center gap-1.5"
                   >
                     <RotateCcw className="w-4 h-4" />
                     Volver a Jugar
@@ -1896,7 +1988,7 @@ export const AnimeMiniGames: React.FC<AnimeMiniGamesProps> = ({
                   <button
                     type="button"
                     onClick={() => setGameStage('TITLE_MENU')}
-                    className="px-5 py-2.5 rounded-xl border border-stone-700 text-stone-300 text-xs font-semibold"
+                    className="px-4 sm:px-5 py-2 sm:py-2.5 rounded-xl border border-stone-700 text-stone-300 text-xs font-semibold"
                   >
                     Cambiar de Videojuego
                   </button>
@@ -1905,30 +1997,29 @@ export const AnimeMiniGames: React.FC<AnimeMiniGamesProps> = ({
             )}
           </div>
 
-          {/* Bottom Interactive Controls Deck (On-Screen Gamepad + Tactical RPG Command Deck) */}
-          <div className="p-4 bg-stone-900 border-t border-stone-800">
+          {/* Bottom Interactive Controls Deck (On-Screen Touch Gamepad + Tactical RPG Deck) */}
+          <div className="p-3 sm:p-4 bg-stone-900 border-t border-stone-800">
             {activeGenre === 'TACTICAL_RPG' && gameStage === 'PLAYING' ? (
               <div className="space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-mono">
                   <span className="text-amber-300">{tacticalLog}</span>
                   <span className="text-stone-400">
-                    Héroe: {tacticalHeroHp}/120 PS · Energía: {tacticalHeroMp}/100 · Límite:{' '}
-                    {tacticalLimitGauge}% | Jefe (Oleada {tacticalWave}/2): {tacticalBossHp}/
-                    {tacticalBossMaxHp} PS
+                    Héroe: {tacticalHeroHp}/120 PS · Límite: {tacticalLimitGauge}% | Jefe:{' '}
+                    {tacticalBossHp}/{tacticalBossMaxHp} PS
                   </span>
                 </div>
 
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-2.5">
                   <button
                     type="button"
                     disabled={tacticalTurn !== 'PLAYER'}
                     onClick={() => executeTacticalSkill('LIGHT')}
-                    className="p-3 rounded-xl bg-stone-800 hover:bg-stone-700 disabled:opacity-40 border border-stone-700 text-left transition-colors"
+                    className="p-2.5 sm:p-3 rounded-xl bg-stone-800 hover:bg-stone-700 disabled:opacity-40 border border-stone-700 text-left transition-colors"
                   >
                     <div className="text-xs font-bold text-amber-400">
                       1. {palette.projectileName}
                     </div>
-                    <div className="text-[11px] text-stone-300 font-mono mt-0.5">
+                    <div className="text-[10px] sm:text-[11px] text-stone-300 font-mono mt-0.5">
                       Daño rápido · +15 Energía
                     </div>
                   </button>
@@ -1937,11 +2028,11 @@ export const AnimeMiniGames: React.FC<AnimeMiniGamesProps> = ({
                     type="button"
                     disabled={tacticalTurn !== 'PLAYER' || tacticalHeroMp < 30}
                     onClick={() => executeTacticalSkill('HEAVY')}
-                    className="p-3 rounded-xl bg-stone-800 hover:bg-stone-700 disabled:opacity-40 border border-stone-700 text-left transition-colors"
+                    className="p-2.5 sm:p-3 rounded-xl bg-stone-800 hover:bg-stone-700 disabled:opacity-40 border border-stone-700 text-left transition-colors"
                   >
                     <div className="text-xs font-bold text-sky-400">2. Combo Elemental</div>
-                    <div className="text-[11px] text-stone-300 font-mono mt-0.5">
-                      ~65 Daño · Coste: 30 Energía
+                    <div className="text-[10px] sm:text-[11px] text-stone-300 font-mono mt-0.5">
+                      ~65 Daño · 30 Energía
                     </div>
                   </button>
 
@@ -1949,13 +2040,13 @@ export const AnimeMiniGames: React.FC<AnimeMiniGamesProps> = ({
                     type="button"
                     disabled={tacticalTurn !== 'PLAYER' || tacticalHeroMp < 20}
                     onClick={() => executeTacticalSkill('SHIELD_HEAL')}
-                    className="p-3 rounded-xl bg-stone-800 hover:bg-stone-700 disabled:opacity-40 border border-stone-700 text-left transition-colors"
+                    className="p-2.5 sm:p-3 rounded-xl bg-stone-800 hover:bg-stone-700 disabled:opacity-40 border border-stone-700 text-left transition-colors"
                   >
                     <div className="text-xs font-bold text-emerald-400">
-                      3. Barrera + Curación
+                      3. Barrera + Cura
                     </div>
-                    <div className="text-[11px] text-stone-300 font-mono mt-0.5">
-                      +45 PS & Escudo · 20 Energía
+                    <div className="text-[10px] sm:text-[11px] text-stone-300 font-mono mt-0.5">
+                      +45 PS & Escudo · 20 E.
                     </div>
                   </button>
 
@@ -1963,7 +2054,7 @@ export const AnimeMiniGames: React.FC<AnimeMiniGamesProps> = ({
                     type="button"
                     disabled={tacticalTurn !== 'PLAYER' || tacticalLimitGauge < 100}
                     onClick={() => executeTacticalSkill('ULTIMATE')}
-                    className={`p-3 rounded-xl border text-left transition-all ${
+                    className={`p-2.5 sm:p-3 rounded-xl border text-left transition-all ${
                       tacticalLimitGauge >= 100
                         ? 'bg-amber-600 hover:bg-amber-500 border-amber-400 text-white'
                         : 'bg-stone-800/50 border-stone-800 text-stone-500 opacity-50'
@@ -1972,135 +2063,403 @@ export const AnimeMiniGames: React.FC<AnimeMiniGamesProps> = ({
                     <div className="text-xs font-bold flex items-center gap-1">
                       <Flame className="w-3.5 h-3.5" /> 4. Definitivo ({tacticalLimitGauge}%)
                     </div>
-                    <div className="text-[11px] font-mono mt-0.5 truncate">
+                    <div className="text-[10px] sm:text-[11px] font-mono mt-0.5 truncate">
                       {palette.ultimateName} (-115 PS)
                     </div>
                   </button>
                 </div>
               </div>
             ) : (
-              /* Touch / Mouse On-Screen Arcade Controls + Keyboard Legend */
-              <div className="flex flex-wrap items-center justify-between gap-4">
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <button
-                    type="button"
-                    onMouseDown={() => setVirtualKey('ArrowLeft', true)}
-                    onMouseUp={() => setVirtualKey('ArrowLeft', false)}
-                    onTouchStart={() => setVirtualKey('ArrowLeft', true)}
-                    onTouchEnd={() => setVirtualKey('ArrowLeft', false)}
-                    className="px-3.5 py-2 rounded-lg bg-stone-800 active:bg-amber-600 text-xs font-mono font-bold select-none"
-                  >
-                    ← Izq (A)
-                  </button>
-                  <button
-                    type="button"
-                    onMouseDown={() => setVirtualKey('ArrowRight', true)}
-                    onMouseUp={() => setVirtualKey('ArrowRight', false)}
-                    onTouchStart={() => setVirtualKey('ArrowRight', true)}
-                    onTouchEnd={() => setVirtualKey('ArrowRight', false)}
-                    className="px-3.5 py-2 rounded-lg bg-stone-800 active:bg-amber-600 text-xs font-mono font-bold select-none"
-                  >
-                    Der (D) →
-                  </button>
-                  {activeGenre === 'RPG_ADVENTURE' && (
-                    <>
-                      <button
-                        type="button"
-                        onMouseDown={() => setVirtualKey('ArrowUp', true)}
-                        onMouseUp={() => setVirtualKey('ArrowUp', false)}
-                        onTouchStart={() => setVirtualKey('ArrowUp', true)}
-                        onTouchEnd={() => setVirtualKey('ArrowUp', false)}
-                        className="px-3.5 py-2 rounded-lg bg-stone-800 active:bg-amber-600 text-xs font-mono font-bold select-none"
-                      >
-                        ↑ Arriba (W)
-                      </button>
-                      <button
-                        type="button"
-                        onMouseDown={() => setVirtualKey('ArrowDown', true)}
-                        onMouseUp={() => setVirtualKey('ArrowDown', false)}
-                        onTouchStart={() => setVirtualKey('ArrowDown', true)}
-                        onTouchEnd={() => setVirtualKey('ArrowDown', false)}
-                        className="px-3.5 py-2 rounded-lg bg-stone-800 active:bg-amber-600 text-xs font-mono font-bold select-none"
-                      >
-                        ↓ Abajo (S)
-                      </button>
-                    </>
-                  )}
+              <div>
+                {/* 1. Dedicated Mobile Handheld Gamepad (< sm) */}
+                <div className="sm:hidden space-y-2">
+                  <div className="flex items-center justify-between gap-3 px-1">
+                    {/* Left Thumb: Directional D-Pad */}
+                    <div className="flex items-center gap-1.5">
+                      {activeGenre === 'RPG_ADVENTURE' ? (
+                        <div className="grid grid-cols-3 gap-1 w-32">
+                          <div />
+                          <button
+                            type="button"
+                            onTouchStart={(e) => {
+                              e.preventDefault();
+                              setVirtualKey('ArrowUp', true);
+                            }}
+                            onTouchEnd={(e) => {
+                              e.preventDefault();
+                              setVirtualKey('ArrowUp', false);
+                            }}
+                            onTouchCancel={(e) => {
+                              e.preventDefault();
+                              setVirtualKey('ArrowUp', false);
+                            }}
+                            onMouseDown={() => setVirtualKey('ArrowUp', true)}
+                            onMouseUp={() => setVirtualKey('ArrowUp', false)}
+                            className="h-11 rounded-lg bg-stone-800 active:bg-amber-600 flex items-center justify-center font-bold text-sm touch-none select-none text-white border border-stone-700"
+                            aria-label="Arriba"
+                          >
+                            ▲
+                          </button>
+                          <div />
+                          <button
+                            type="button"
+                            onTouchStart={(e) => {
+                              e.preventDefault();
+                              setVirtualKey('ArrowLeft', true);
+                            }}
+                            onTouchEnd={(e) => {
+                              e.preventDefault();
+                              setVirtualKey('ArrowLeft', false);
+                            }}
+                            onTouchCancel={(e) => {
+                              e.preventDefault();
+                              setVirtualKey('ArrowLeft', false);
+                            }}
+                            onMouseDown={() => setVirtualKey('ArrowLeft', true)}
+                            onMouseUp={() => setVirtualKey('ArrowLeft', false)}
+                            className="h-11 rounded-lg bg-stone-800 active:bg-amber-600 flex items-center justify-center font-bold text-sm touch-none select-none text-white border border-stone-700"
+                            aria-label="Izquierda"
+                          >
+                            ◀
+                          </button>
+                          <button
+                            type="button"
+                            onTouchStart={(e) => {
+                              e.preventDefault();
+                              setVirtualKey('ArrowDown', true);
+                            }}
+                            onTouchEnd={(e) => {
+                              e.preventDefault();
+                              setVirtualKey('ArrowDown', false);
+                            }}
+                            onTouchCancel={(e) => {
+                              e.preventDefault();
+                              setVirtualKey('ArrowDown', false);
+                            }}
+                            onMouseDown={() => setVirtualKey('ArrowDown', true)}
+                            onMouseUp={() => setVirtualKey('ArrowDown', false)}
+                            className="h-11 rounded-lg bg-stone-800 active:bg-amber-600 flex items-center justify-center font-bold text-sm touch-none select-none text-white border border-stone-700"
+                            aria-label="Abajo"
+                          >
+                            ▼
+                          </button>
+                          <button
+                            type="button"
+                            onTouchStart={(e) => {
+                              e.preventDefault();
+                              setVirtualKey('ArrowRight', true);
+                            }}
+                            onTouchEnd={(e) => {
+                              e.preventDefault();
+                              setVirtualKey('ArrowRight', false);
+                            }}
+                            onTouchCancel={(e) => {
+                              e.preventDefault();
+                              setVirtualKey('ArrowRight', false);
+                            }}
+                            onMouseDown={() => setVirtualKey('ArrowRight', true)}
+                            onMouseUp={() => setVirtualKey('ArrowRight', false)}
+                            className="h-11 rounded-lg bg-stone-800 active:bg-amber-600 flex items-center justify-center font-bold text-sm touch-none select-none text-white border border-stone-700"
+                            aria-label="Derecha"
+                          >
+                            ▶
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onTouchStart={(e) => {
+                              e.preventDefault();
+                              setVirtualKey('ArrowLeft', true);
+                            }}
+                            onTouchEnd={(e) => {
+                              e.preventDefault();
+                              setVirtualKey('ArrowLeft', false);
+                            }}
+                            onTouchCancel={(e) => {
+                              e.preventDefault();
+                              setVirtualKey('ArrowLeft', false);
+                            }}
+                            onMouseDown={() => setVirtualKey('ArrowLeft', true)}
+                            onMouseUp={() => setVirtualKey('ArrowLeft', false)}
+                            className="w-16 h-12 rounded-xl bg-stone-800 active:bg-amber-600 flex items-center justify-center text-xs font-bold text-white border border-stone-700 shadow-md touch-none select-none"
+                            aria-label="Izquierda"
+                          >
+                            ◀ IZQ
+                          </button>
+                          <button
+                            type="button"
+                            onTouchStart={(e) => {
+                              e.preventDefault();
+                              setVirtualKey('ArrowRight', true);
+                            }}
+                            onTouchEnd={(e) => {
+                              e.preventDefault();
+                              setVirtualKey('ArrowRight', false);
+                            }}
+                            onTouchCancel={(e) => {
+                              e.preventDefault();
+                              setVirtualKey('ArrowRight', false);
+                            }}
+                            onMouseDown={() => setVirtualKey('ArrowRight', true)}
+                            onMouseUp={() => setVirtualKey('ArrowRight', false)}
+                            className="w-16 h-12 rounded-xl bg-stone-800 active:bg-amber-600 flex items-center justify-center text-xs font-bold text-white border border-stone-700 shadow-md touch-none select-none"
+                            aria-label="Derecha"
+                          >
+                            DER ▶
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Right Thumb: High-contrast Action Buttons */}
+                    <div className="flex items-center gap-2">
+                      {activeGenre === 'PLATFORMER' && (
+                        <>
+                          <button
+                            type="button"
+                            onTouchStart={(e) => {
+                              e.preventDefault();
+                              setVirtualKey('KeyJ', true);
+                            }}
+                            onTouchEnd={(e) => {
+                              e.preventDefault();
+                              setVirtualKey('KeyJ', false);
+                            }}
+                            onTouchCancel={(e) => {
+                              e.preventDefault();
+                              setVirtualKey('KeyJ', false);
+                            }}
+                            onMouseDown={() => setVirtualKey('KeyJ', true)}
+                            onMouseUp={() => setVirtualKey('KeyJ', false)}
+                            className="px-3 h-12 rounded-xl bg-sky-600 active:bg-sky-500 text-xs font-bold text-white border border-sky-400 shadow-md flex items-center justify-center touch-none select-none"
+                            aria-label="Disparar"
+                          >
+                            ⚡ DISPARO
+                          </button>
+                          <button
+                            type="button"
+                            onTouchStart={(e) => {
+                              e.preventDefault();
+                              setVirtualKey('KeyK', true);
+                            }}
+                            onTouchEnd={(e) => {
+                              e.preventDefault();
+                              setVirtualKey('KeyK', false);
+                            }}
+                            onTouchCancel={(e) => {
+                              e.preventDefault();
+                              setVirtualKey('KeyK', false);
+                            }}
+                            onMouseDown={() => setVirtualKey('KeyK', true)}
+                            onMouseUp={() => setVirtualKey('KeyK', false)}
+                            className="px-3 h-12 rounded-xl bg-emerald-700 active:bg-emerald-600 text-xs font-bold text-white border border-emerald-500 shadow-md flex items-center justify-center touch-none select-none"
+                            aria-label="Dash"
+                          >
+                            DASH
+                          </button>
+                          <button
+                            type="button"
+                            onTouchStart={(e) => {
+                              e.preventDefault();
+                              setVirtualKey('Space', true);
+                            }}
+                            onTouchEnd={(e) => {
+                              e.preventDefault();
+                              setVirtualKey('Space', false);
+                            }}
+                            onTouchCancel={(e) => {
+                              e.preventDefault();
+                              setVirtualKey('Space', false);
+                            }}
+                            onMouseDown={() => setVirtualKey('Space', true)}
+                            onMouseUp={() => setVirtualKey('Space', false)}
+                            className="px-4 h-12 rounded-xl bg-amber-600 active:bg-amber-500 text-xs font-bold text-white border border-amber-400 shadow-md flex items-center justify-center touch-none select-none"
+                            aria-label="Salto"
+                          >
+                            ⬆ SALTO
+                          </button>
+                        </>
+                      )}
+
+                      {activeGenre === 'RACING' && (
+                        <button
+                          type="button"
+                          onTouchStart={(e) => {
+                            e.preventDefault();
+                            setVirtualKey('Space', true);
+                          }}
+                          onTouchEnd={(e) => {
+                            e.preventDefault();
+                            setVirtualKey('Space', false);
+                          }}
+                          onTouchCancel={(e) => {
+                            e.preventDefault();
+                            setVirtualKey('Space', false);
+                          }}
+                          onMouseDown={() => setVirtualKey('Space', true)}
+                          onMouseUp={() => setVirtualKey('Space', false)}
+                          className="px-6 h-12 rounded-xl bg-sky-600 active:bg-sky-500 text-xs font-bold text-white border border-sky-400 shadow-md flex items-center justify-center touch-none select-none"
+                          aria-label="Nitro Turbo"
+                        >
+                          🔥 NITRO TURBO
+                        </button>
+                      )}
+
+                      {activeGenre === 'RPG_ADVENTURE' && (
+                        <>
+                          <button
+                            type="button"
+                            onTouchStart={(e) => {
+                              e.preventDefault();
+                              setVirtualKey('KeyK', true);
+                            }}
+                            onTouchEnd={(e) => {
+                              e.preventDefault();
+                              setVirtualKey('KeyK', false);
+                            }}
+                            onTouchCancel={(e) => {
+                              e.preventDefault();
+                              setVirtualKey('KeyK', false);
+                            }}
+                            onMouseDown={() => setVirtualKey('KeyK', true)}
+                            onMouseUp={() => setVirtualKey('KeyK', false)}
+                            className="px-3.5 h-12 rounded-xl bg-sky-600 active:bg-sky-500 text-xs font-bold text-white border border-sky-400 shadow-md flex items-center justify-center touch-none select-none"
+                            aria-label="Nova Elemental"
+                          >
+                            💥 NOVA
+                          </button>
+                          <button
+                            type="button"
+                            onTouchStart={(e) => {
+                              e.preventDefault();
+                              setVirtualKey('Space', true);
+                            }}
+                            onTouchEnd={(e) => {
+                              e.preventDefault();
+                              setVirtualKey('Space', false);
+                            }}
+                            onTouchCancel={(e) => {
+                              e.preventDefault();
+                              setVirtualKey('Space', false);
+                            }}
+                            onMouseDown={() => setVirtualKey('Space', true)}
+                            onMouseUp={() => setVirtualKey('Space', false)}
+                            className="px-4 h-12 rounded-xl bg-amber-600 active:bg-amber-500 text-xs font-bold text-white border border-amber-400 shadow-md flex items-center justify-center touch-none select-none"
+                            aria-label="Atacar"
+                          >
+                            ⚔️ ATACAR
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </div>
                 </div>
 
-                <div className="flex flex-wrap items-center gap-2">
-                  {activeGenre === 'PLATFORMER' && (
-                    <>
-                      <button
-                        type="button"
-                        onMouseDown={() => setVirtualKey('Space', true)}
-                        onMouseUp={() => setVirtualKey('Space', false)}
-                        onTouchStart={() => setVirtualKey('Space', true)}
-                        onTouchEnd={() => setVirtualKey('Space', false)}
-                        className="px-4 py-2 rounded-lg bg-amber-600 active:bg-amber-500 text-xs font-mono font-bold select-none"
-                      >
-                        ↑ Saltar / Doble Salto (W / Espacio)
-                      </button>
-                      <button
-                        type="button"
-                        onMouseDown={() => setVirtualKey('KeyJ', true)}
-                        onMouseUp={() => setVirtualKey('KeyJ', false)}
-                        onTouchStart={() => setVirtualKey('KeyJ', true)}
-                        onTouchEnd={() => setVirtualKey('KeyJ', false)}
-                        className="px-4 py-2 rounded-lg bg-sky-600 active:bg-sky-500 text-xs font-mono font-bold select-none"
-                      >
-                        ⚡ Disparar {palette.projectileName} (J)
-                      </button>
-                      <button
-                        type="button"
-                        onMouseDown={() => setVirtualKey('KeyK', true)}
-                        onMouseUp={() => setVirtualKey('KeyK', false)}
-                        onTouchStart={() => setVirtualKey('KeyK', true)}
-                        onTouchEnd={() => setVirtualKey('KeyK', false)}
-                        className="px-3.5 py-2 rounded-lg bg-emerald-700 active:bg-emerald-600 text-xs font-mono font-bold select-none"
-                      >
-                        Dash (Shift / K)
-                      </button>
-                    </>
-                  )}
-
-                  {activeGenre === 'RACING' && (
+                {/* 2. Desktop Controls Deck (sm:flex) */}
+                <div className="hidden sm:flex flex-wrap items-center justify-between gap-4">
+                  <div className="flex flex-wrap items-center gap-1.5">
                     <button
                       type="button"
-                      onMouseDown={() => setVirtualKey('Space', true)}
-                      onMouseUp={() => setVirtualKey('Space', false)}
-                      onTouchStart={() => setVirtualKey('Space', true)}
-                      onTouchEnd={() => setVirtualKey('Space', false)}
-                      className="px-5 py-2 rounded-lg bg-sky-600 active:bg-sky-500 text-xs font-mono font-bold select-none"
+                      onMouseDown={() => setVirtualKey('ArrowLeft', true)}
+                      onMouseUp={() => setVirtualKey('ArrowLeft', false)}
+                      className="px-3.5 py-2 rounded-lg bg-stone-800 active:bg-amber-600 text-xs font-mono font-bold select-none cursor-pointer"
                     >
-                      🔥 Activar NITRO TURBO (Espacio / J)
+                      ← Izq (A)
                     </button>
-                  )}
+                    <button
+                      type="button"
+                      onMouseDown={() => setVirtualKey('ArrowRight', true)}
+                      onMouseUp={() => setVirtualKey('ArrowRight', false)}
+                      className="px-3.5 py-2 rounded-lg bg-stone-800 active:bg-amber-600 text-xs font-mono font-bold select-none cursor-pointer"
+                    >
+                      Der (D) →
+                    </button>
+                    {activeGenre === 'RPG_ADVENTURE' && (
+                      <>
+                        <button
+                          type="button"
+                          onMouseDown={() => setVirtualKey('ArrowUp', true)}
+                          onMouseUp={() => setVirtualKey('ArrowUp', false)}
+                          className="px-3.5 py-2 rounded-lg bg-stone-800 active:bg-amber-600 text-xs font-mono font-bold select-none cursor-pointer"
+                        >
+                          ↑ Arriba (W)
+                        </button>
+                        <button
+                          type="button"
+                          onMouseDown={() => setVirtualKey('ArrowDown', true)}
+                          onMouseUp={() => setVirtualKey('ArrowDown', false)}
+                          className="px-3.5 py-2 rounded-lg bg-stone-800 active:bg-amber-600 text-xs font-mono font-bold select-none cursor-pointer"
+                        >
+                          ↓ Abajo (S)
+                        </button>
+                      </>
+                    )}
+                  </div>
 
-                  {activeGenre === 'RPG_ADVENTURE' && (
-                    <>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {activeGenre === 'PLATFORMER' && (
+                      <>
+                        <button
+                          type="button"
+                          onMouseDown={() => setVirtualKey('Space', true)}
+                          onMouseUp={() => setVirtualKey('Space', false)}
+                          className="px-4 py-2 rounded-lg bg-amber-600 active:bg-amber-500 text-xs font-mono font-bold select-none cursor-pointer"
+                        >
+                          ↑ Saltar / Doble Salto (W / Espacio)
+                        </button>
+                        <button
+                          type="button"
+                          onMouseDown={() => setVirtualKey('KeyJ', true)}
+                          onMouseUp={() => setVirtualKey('KeyJ', false)}
+                          className="px-4 py-2 rounded-lg bg-sky-600 active:bg-sky-500 text-xs font-mono font-bold select-none cursor-pointer"
+                        >
+                          ⚡ Disparar {palette.projectileName} (J)
+                        </button>
+                        <button
+                          type="button"
+                          onMouseDown={() => setVirtualKey('KeyK', true)}
+                          onMouseUp={() => setVirtualKey('KeyK', false)}
+                          className="px-3.5 py-2 rounded-lg bg-emerald-700 active:bg-emerald-600 text-xs font-mono font-bold select-none cursor-pointer"
+                        >
+                          Dash (Shift / K)
+                        </button>
+                      </>
+                    )}
+
+                    {activeGenre === 'RACING' && (
                       <button
                         type="button"
                         onMouseDown={() => setVirtualKey('Space', true)}
                         onMouseUp={() => setVirtualKey('Space', false)}
-                        onTouchStart={() => setVirtualKey('Space', true)}
-                        onTouchEnd={() => setVirtualKey('Space', false)}
-                        className="px-4 py-2 rounded-lg bg-amber-600 active:bg-amber-500 text-xs font-mono font-bold select-none"
+                        className="px-5 py-2 rounded-lg bg-sky-600 active:bg-sky-500 text-xs font-mono font-bold select-none cursor-pointer"
                       >
-                        ⚔️ Tajo de Espada (Espacio / J)
+                        🔥 Activar NITRO TURBO (Espacio / J)
                       </button>
-                      <button
-                        type="button"
-                        onMouseDown={() => setVirtualKey('KeyK', true)}
-                        onMouseUp={() => setVirtualKey('KeyK', false)}
-                        onTouchStart={() => setVirtualKey('KeyK', true)}
-                        onTouchEnd={() => setVirtualKey('KeyK', false)}
-                        className="px-4 py-2 rounded-lg bg-sky-600 active:bg-sky-500 text-xs font-mono font-bold select-none"
-                      >
-                        💥 Nova Elemental (K / Q)
-                      </button>
-                    </>
-                  )}
+                    )}
+
+                    {activeGenre === 'RPG_ADVENTURE' && (
+                      <>
+                        <button
+                          type="button"
+                          onMouseDown={() => setVirtualKey('Space', true)}
+                          onMouseUp={() => setVirtualKey('Space', false)}
+                          className="px-4 py-2 rounded-lg bg-amber-600 active:bg-amber-500 text-xs font-mono font-bold select-none cursor-pointer"
+                        >
+                          ⚔️ Tajo de Espada (Espacio / J)
+                        </button>
+                        <button
+                          type="button"
+                          onMouseDown={() => setVirtualKey('KeyK', true)}
+                          onMouseUp={() => setVirtualKey('KeyK', false)}
+                          className="px-4 py-2 rounded-lg bg-sky-600 active:bg-sky-500 text-xs font-mono font-bold select-none cursor-pointer"
+                        >
+                          💥 Nova Elemental (K / Q)
+                        </button>
+                      </>
+                    )}
+                  </div>
                 </div>
               </div>
             )}
@@ -2111,7 +2470,7 @@ export const AnimeMiniGames: React.FC<AnimeMiniGamesProps> = ({
       {/* =====================================================================
           2. TIENDA VIRTUAL DE PUNTOS DE ESTUDIO (CANJEO DE PASES Y MEJORAS)
           ===================================================================== */}
-      <div className="border border-stone-200 dark:border-stone-800 rounded-xl bg-white dark:bg-stone-900 p-6 space-y-6">
+      <div className="border border-stone-200 dark:border-stone-800 rounded-xl bg-white dark:bg-stone-900 p-3 sm:p-6 space-y-5 sm:space-y-6">
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 pb-4 border-b border-stone-200 dark:border-stone-800">
           <div>
             <p className="text-xs text-stone-500 dark:text-stone-400">

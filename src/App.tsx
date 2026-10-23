@@ -1155,7 +1155,7 @@ export default function App() {
         {/* =====================================================================
             MAIN CONTENT VIEWPORT
             ===================================================================== */}
-        <main className="max-w-7xl mx-auto px-6 py-8 space-y-10">
+        <main className="max-w-7xl mx-auto px-3 sm:px-6 py-4 sm:py-8 space-y-8 sm:space-y-10">
           {/* TAB 1: DASHBOARD (PANEL PRINCIPAL CON TODAS LAS ASIGNATURAS DEL CURSO SELECCIONADO) */}
           {activeTab === 'dashboard' && (
             <div className="space-y-10">
