@@ -1,16 +1,24 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { COURSE_METADATA } from '../data/clotDelMoroData';
 import { CornellNote, CourseGrade, FlashcardItem, MindMapNode } from '../types';
 import { soundFX } from '../utils/sound';
 import {
+  AlertCircle,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
   Lightbulb,
+  Mic,
+  MicOff,
   Pause,
   Play,
   Plus,
+  Radio,
   RotateCcw,
+  Sparkles,
+  Square,
+  Trash2,
+  Volume2,
 } from 'lucide-react';
 
 interface StudyStudioProps {
@@ -102,6 +110,335 @@ export const StudyStudio: React.FC<StudyStudioProps> = ({
 
   const safeCardIndex = activeDeck.length > 0 ? cardIndex % activeDeck.length : 0;
   const currentCard = activeDeck[safeCardIndex];
+
+  // --- AUDIO & MICROPHONE RECORDING (ACTIVE RECALL & VOCAL REHEARSAL) ---
+  interface CardAudioRecord {
+    audioUrl: string;
+    transcript: string;
+    durationSec: number;
+    recordedAt: number;
+    awarded: boolean;
+  }
+
+  const [cardAudioRecords, setCardAudioRecords] = useState<Record<string, CardAudioRecord>>({});
+  const [isRecordingCardVoice, setIsRecordingCardVoice] = useState<boolean>(false);
+  const [recordingCardSeconds, setRecordingCardSeconds] = useState<number>(0);
+  const [liveCardTranscript, setLiveCardTranscript] = useState<string>('');
+  const [micPermissionError, setMicPermissionError] = useState<string | null>(null);
+
+  const cardMediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const cardStreamRef = useRef<MediaStream | null>(null);
+  const cardSpeechRecRef = useRef<any | null>(null);
+  const cardTimerIntervalRef = useRef<any | null>(null);
+  const createdObjectUrlsRef = useRef<string[]>([]);
+
+  // Cleanup object URLs on unmount
+  useEffect(() => {
+    return () => {
+      createdObjectUrlsRef.current.forEach((url) => {
+        try {
+          URL.revokeObjectURL(url);
+        } catch {}
+      });
+      if (cardStreamRef.current) {
+        try {
+          cardStreamRef.current.getTracks().forEach((track) => track.stop());
+        } catch {}
+      }
+      if (cardSpeechRecRef.current) {
+        try {
+          cardSpeechRecRef.current.stop();
+        } catch {}
+      }
+      if (cardTimerIntervalRef.current) {
+        clearInterval(cardTimerIntervalRef.current);
+      }
+      if (feynmanStreamRef.current) {
+        try {
+          feynmanStreamRef.current.getTracks().forEach((track) => track.stop());
+        } catch {}
+      }
+      if (feynmanSpeechRecRef.current) {
+        try {
+          feynmanSpeechRecRef.current.stop();
+        } catch {}
+      }
+    };
+  }, []);
+
+  const revokeUrl = (url: string) => {
+    try {
+      URL.revokeObjectURL(url);
+    } catch {}
+    createdObjectUrlsRef.current = createdObjectUrlsRef.current.filter((u) => u !== url);
+  };
+
+  const startCardRecording = async (cardId: string) => {
+    setMicPermissionError(null);
+    setLiveCardTranscript('');
+    setRecordingCardSeconds(0);
+
+    if (
+      typeof window === 'undefined' ||
+      !navigator.mediaDevices ||
+      !navigator.mediaDevices.getUserMedia
+    ) {
+      setMicPermissionError(
+        'Tu navegador no tiene activado el soporte para captura directa de micrófono. Prueba con Chrome, Edge o Safari.'
+      );
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      cardStreamRef.current = stream;
+
+      const mimeTypes = [
+        'audio/webm;codecs=opus',
+        'audio/webm',
+        'audio/ogg;codecs=opus',
+        'audio/mp4',
+        '',
+      ];
+      let chosenMime = '';
+      for (const mt of mimeTypes) {
+        if (
+          !mt ||
+          (typeof MediaRecorder !== 'undefined' &&
+            MediaRecorder.isTypeSupported &&
+            MediaRecorder.isTypeSupported(mt))
+        ) {
+          chosenMime = mt;
+          break;
+        }
+      }
+
+      const recorder = chosenMime
+        ? new MediaRecorder(stream, { mimeType: chosenMime })
+        : new MediaRecorder(stream);
+      cardMediaRecorderRef.current = recorder;
+      const audioChunks: BlobPart[] = [];
+
+      recorder.ondataavailable = (event) => {
+        if (event.data && event.data.size > 0) {
+          audioChunks.push(event.data);
+        }
+      };
+
+      recorder.onstop = () => {
+        const blob = new Blob(audioChunks, { type: chosenMime || 'audio/webm' });
+        const audioUrl = URL.createObjectURL(blob);
+        createdObjectUrlsRef.current.push(audioUrl);
+
+        let finalTranscript = '';
+        setLiveCardTranscript((cur) => {
+          finalTranscript = cur.trim();
+          return cur;
+        });
+
+        setCardAudioRecords((prev) => {
+          if (prev[cardId]?.audioUrl) {
+            revokeUrl(prev[cardId].audioUrl);
+          }
+          const alreadyAwarded = prev[cardId]?.awarded;
+          if (!alreadyAwarded) {
+            soundFX.playRewardUnlock();
+            const bonusBreak = Math.max(1, Math.round(2 * studyRatioX));
+            onCompleteFocusBlock(2, 15, bonusBreak);
+          } else {
+            soundFX.playStepComplete();
+          }
+          return {
+            ...prev,
+            [cardId]: {
+              audioUrl,
+              transcript:
+                finalTranscript || 'Respuesta oral registrada correctamente con micrófono.',
+              durationSec: recordingCardSeconds || 1,
+              recordedAt: Date.now(),
+              awarded: true,
+            },
+          };
+        });
+      };
+
+      recorder.start(250);
+      setIsRecordingCardVoice(true);
+
+      let elapsed = 0;
+      cardTimerIntervalRef.current = setInterval(() => {
+        elapsed += 1;
+        setRecordingCardSeconds(elapsed);
+        if (elapsed >= 90) {
+          stopCardRecording(cardId);
+        }
+      }, 1000);
+
+      // Web Speech API for real-time transcription
+      const SpeechRecClass =
+        (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      if (SpeechRecClass) {
+        try {
+          const rec = new SpeechRecClass();
+          rec.lang = 'es-ES';
+          rec.continuous = true;
+          rec.interimResults = true;
+          rec.onresult = (evt: any) => {
+            let spoken = '';
+            for (let i = 0; i < evt.results.length; i++) {
+              spoken += evt.results[i][0].transcript + ' ';
+            }
+            setLiveCardTranscript(spoken.trim());
+          };
+          rec.onerror = () => {};
+          rec.start();
+          cardSpeechRecRef.current = rec;
+        } catch (e) {
+          console.warn('SpeechRecognition not started', e);
+        }
+      }
+    } catch (err: any) {
+      console.error('Microphone access error:', err);
+      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+        setMicPermissionError(
+          'Permiso de micrófono denegado en tu navegador. Haz clic en el icono del candado o configuración junto a la barra de direcciones y selecciona "Permitir micrófono".'
+        );
+      } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+        setMicPermissionError(
+          'No se encontró ningún micrófono conectado. Conecta un micrófono o auriculares con micro para practicar en voz alta.'
+        );
+      } else {
+        setMicPermissionError(
+          `No se pudo iniciar el micrófono: ${err.message || 'Comprueba los permisos de audio en tu sistema operativo.'}`
+        );
+      }
+      setIsRecordingCardVoice(false);
+    }
+  };
+
+  const stopCardRecording = (_cardId: string) => {
+    setIsRecordingCardVoice(false);
+
+    if (cardTimerIntervalRef.current) {
+      clearInterval(cardTimerIntervalRef.current);
+      cardTimerIntervalRef.current = null;
+    }
+
+    if (cardSpeechRecRef.current) {
+      try {
+        cardSpeechRecRef.current.stop();
+      } catch {}
+      cardSpeechRecRef.current = null;
+    }
+
+    if (cardMediaRecorderRef.current && cardMediaRecorderRef.current.state !== 'inactive') {
+      try {
+        cardMediaRecorderRef.current.stop();
+      } catch {}
+    }
+
+    if (cardStreamRef.current) {
+      try {
+        cardStreamRef.current.getTracks().forEach((track) => track.stop());
+      } catch {}
+      cardStreamRef.current = null;
+    }
+  };
+
+  const discardCardAudio = (cardId: string) => {
+    setCardAudioRecords((prev) => {
+      if (prev[cardId]?.audioUrl) {
+        revokeUrl(prev[cardId].audioUrl);
+      }
+      const copy = { ...prev };
+      delete copy[cardId];
+      return copy;
+    });
+  };
+
+  // --- FEYNMAN VOICE DICTATION & RECORDING ---
+  const [isRecordingFeynman, setIsRecordingFeynman] = useState<boolean>(false);
+  const [feynmanAudioUrl, setFeynmanAudioUrl] = useState<string | null>(null);
+  const [feynmanMicError, setFeynmanMicError] = useState<string | null>(null);
+  const feynmanStreamRef = useRef<MediaStream | null>(null);
+  const feynmanMediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const feynmanSpeechRecRef = useRef<any | null>(null);
+
+  const startFeynmanRecording = async () => {
+    setFeynmanMicError(null);
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      setFeynmanMicError('Navegador sin soporte para micrófono.');
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      feynmanStreamRef.current = stream;
+      const chunks: BlobPart[] = [];
+      const recorder = new MediaRecorder(stream);
+      feynmanMediaRecorderRef.current = recorder;
+
+      recorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) chunks.push(e.data);
+      };
+
+      recorder.onstop = () => {
+        const blob = new Blob(chunks, { type: 'audio/webm' });
+        const url = URL.createObjectURL(blob);
+        createdObjectUrlsRef.current.push(url);
+        setFeynmanAudioUrl(url);
+        soundFX.playStepComplete();
+      };
+
+      recorder.start(250);
+      setIsRecordingFeynman(true);
+
+      const SpeechRecClass =
+        (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      if (SpeechRecClass) {
+        try {
+          const recognition = new SpeechRecClass();
+          recognition.lang = 'es-ES';
+          recognition.continuous = true;
+          recognition.interimResults = true;
+          recognition.onresult = (event: any) => {
+            let spoken = '';
+            for (let i = 0; i < event.results.length; i++) {
+              spoken += event.results[i][0].transcript + ' ';
+            }
+            if (spoken.trim()) {
+              setFeynmanSimpleExplanation(spoken.trim());
+            }
+          };
+          recognition.start();
+          feynmanSpeechRecRef.current = recognition;
+        } catch {}
+      }
+    } catch (err: any) {
+      setFeynmanMicError('Permiso de micrófono no otorgado en el navegador.');
+      setIsRecordingFeynman(false);
+    }
+  };
+
+  const stopFeynmanRecording = () => {
+    setIsRecordingFeynman(false);
+    if (feynmanSpeechRecRef.current) {
+      try {
+        feynmanSpeechRecRef.current.stop();
+      } catch {}
+      feynmanSpeechRecRef.current = null;
+    }
+    if (feynmanMediaRecorderRef.current && feynmanMediaRecorderRef.current.state !== 'inactive') {
+      try {
+        feynmanMediaRecorderRef.current.stop();
+      } catch {}
+    }
+    if (feynmanStreamRef.current) {
+      try {
+        feynmanStreamRef.current.getTracks().forEach((track) => track.stop());
+      } catch {}
+      feynmanStreamRef.current = null;
+    }
+  };
 
   const handleCreateFlashcard = (e: React.FormEvent) => {
     e.preventDefault();
@@ -462,59 +799,211 @@ export const StudyStudio: React.FC<StudyStudioProps> = ({
               </form>
             )}
 
-            <div className="p-6 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50/70 dark:bg-stone-800/40 space-y-4">
-              <div className="flex items-center justify-between text-xs text-stone-500 dark:text-stone-400">
-                <span>{showAnswer ? 'RESPUESTA EXPLICADA' : 'PREGUNTA DE AUTOEVALUACIÓN'}</span>
-                <span>{currentCard.mastered ? '✓ Dominada' : '○ En repaso'}</span>
-              </div>
+            {(() => {
+              const currentCardRecord = cardAudioRecords[currentCard.id];
+              return (
+                <div className="p-6 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50/70 dark:bg-stone-800/40 space-y-4">
+                  <div className="flex items-center justify-between text-xs text-stone-500 dark:text-stone-400">
+                    <span className="font-semibold">{showAnswer ? 'RESPUESTA EXPLICADA' : 'PREGUNTA DE AUTOEVALUACIÓN'}</span>
+                    <span>{currentCard.mastered ? '✓ Dominada' : '○ En repaso'}</span>
+                  </div>
 
-              <h3 className="text-lg font-bold text-stone-900 dark:text-white leading-snug">
-                {currentCard.question}
-              </h3>
+                  <h3 className="text-lg font-bold text-stone-900 dark:text-white leading-snug">
+                    {currentCard.question}
+                  </h3>
 
-              {showAnswer ? (
-                <div className="pt-3 border-t border-stone-200 dark:border-stone-700 space-y-3">
-                  <p className="text-sm text-stone-800 dark:text-stone-100 leading-relaxed">
-                    {currentCard.answer}
-                  </p>
-                  <p className="text-xs text-amber-800 dark:text-amber-300 flex items-center gap-1.5">
-                    <Lightbulb className="w-4 h-4 shrink-0" />
-                    <span>{currentCard.mnemonicHint}</span>
-                  </p>
+                  {/* VOICE RECORDING & ACTIVE RECALL ZONE */}
+                  <div className="p-4 rounded-xl border border-amber-300 dark:border-amber-800/70 bg-amber-50/90 dark:bg-amber-950/30 space-y-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-start gap-2.5">
+                        <div className="p-2 rounded-lg bg-amber-500 text-stone-950 shrink-0 mt-0.5 shadow-xs">
+                          <Mic className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h4 className="text-xs font-bold text-stone-900 dark:text-stone-100">
+                              Respuesta en Voz Alta (Recuerdo Activo TDAH)
+                            </h4>
+                            {currentCardRecord?.awarded ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700">
+                                <Sparkles className="w-3 h-3" />
+                                +15 PE Ganados
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-200 dark:bg-amber-900/50 text-amber-900 dark:text-amber-200">
+                                +15 PE por ensayar oralmente
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-xs text-stone-600 dark:text-stone-300 mt-0.5">
+                            Intenta responder en voz alta antes de descubrir la solución (fija el recuerdo en tu memoria auditiva y reduce la impulsividad).
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* State A: Idle - Ready to record */}
+                    {!isRecordingCardVoice && !currentCardRecord?.audioUrl && (
+                      <div className="pt-1 space-y-2">
+                        <button
+                          type="button"
+                          onClick={() => startCardRecording(currentCard.id)}
+                          className="w-full flex items-center justify-center gap-2.5 py-3 px-4 rounded-xl bg-amber-500 hover:bg-amber-600 active:scale-[0.99] text-stone-950 font-bold text-xs sm:text-sm shadow-sm transition-all"
+                        >
+                          <Mic className="w-4 h-4 text-stone-950 shrink-0" />
+                          <span>Activar Micrófono y Responder en Voz Alta (+15 PE)</span>
+                        </button>
+                        <p className="text-[11px] text-center text-stone-500 dark:text-stone-400">
+                          Pulsar activará tu micrófono para que grabes tu propia explicación antes de dar vuelta a la tarjeta.
+                        </p>
+                      </div>
+                    )}
+
+                    {/* State B: Recording in progress */}
+                    {isRecordingCardVoice && (
+                      <div className="p-3.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-300 dark:border-rose-800 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="relative flex h-3 w-3">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+                              <span className="relative inline-flex rounded-full h-3 w-3 bg-rose-600"></span>
+                            </span>
+                            <span className="text-xs font-bold text-rose-700 dark:text-rose-300 uppercase tracking-wide">
+                              Grabando tu respuesta oral...
+                            </span>
+                          </div>
+                          <span className="text-xs font-mono font-bold text-rose-700 dark:text-rose-300 tabular-nums">
+                            {String(Math.floor(recordingCardSeconds / 60)).padStart(2, '0')}:
+                            {String(recordingCardSeconds % 60).padStart(2, '0')} / 01:30
+                          </span>
+                        </div>
+
+                        {/* Live voice transcription */}
+                        <div className="p-2.5 rounded-lg bg-white dark:bg-stone-900 border border-rose-200 dark:border-rose-900/40 text-xs">
+                          <span className="text-stone-400 dark:text-stone-500 text-[10px] block uppercase font-mono mb-1">
+                            Transcripción en vivo:
+                          </span>
+                          <p className="italic text-stone-800 dark:text-stone-200">
+                            {liveCardTranscript || 'Escuchando tu voz... di tu respuesta en voz alta con tranquilidad...'}
+                          </p>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => stopCardRecording(currentCard.id)}
+                          className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-sm transition-colors"
+                        >
+                          <Square className="w-3.5 h-3.5 fill-current" />
+                          <span>Detener Grabación y Guardar Audio (+15 PE)</span>
+                        </button>
+                      </div>
+                    )}
+
+                    {/* State C: Audio Recorded */}
+                    {!isRecordingCardVoice && currentCardRecord?.audioUrl && (
+                      <div className="p-3.5 rounded-xl bg-white dark:bg-stone-900 border border-amber-300 dark:border-amber-800 space-y-2.5 shadow-2xs">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="font-semibold text-emerald-700 dark:text-emerald-400 flex items-center gap-1.5">
+                            <CheckCircle2 className="w-4 h-4" />
+                            Tu respuesta oral registrada
+                          </span>
+                          <span className="text-stone-500 dark:text-stone-400 font-mono text-[11px]">
+                            {currentCardRecord.durationSec}s de audio
+                          </span>
+                        </div>
+
+                        <audio
+                          controls
+                          src={currentCardRecord.audioUrl}
+                          className="w-full h-9 rounded"
+                        />
+
+                        {currentCardRecord.transcript && (
+                          <div className="text-xs bg-stone-50 dark:bg-stone-800/70 p-2.5 rounded-lg border border-stone-200 dark:border-stone-700">
+                            <span className="text-stone-500 dark:text-stone-400 text-[10px] uppercase font-mono block mb-0.5">
+                              Lo que dijiste en voz alta:
+                            </span>
+                            <p className="text-stone-900 dark:text-stone-100 italic">
+                              "{currentCardRecord.transcript}"
+                            </p>
+                          </div>
+                        )}
+
+                        <div className="flex items-center justify-between pt-1">
+                          <button
+                            type="button"
+                            onClick={() => startCardRecording(currentCard.id)}
+                            className="flex items-center gap-1.5 text-xs text-amber-700 dark:text-amber-400 font-semibold hover:underline"
+                          >
+                            <RotateCcw className="w-3.5 h-3.5" />
+                            Volver a grabar
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => discardCardAudio(currentCard.id)}
+                            className="flex items-center gap-1 text-xs text-stone-500 hover:text-rose-600 dark:hover:text-rose-400 transition-colors"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            Descartar
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Microphone Error Alert */}
+                    {micPermissionError && (
+                      <div className="p-3 rounded-lg bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-xs text-rose-800 dark:text-rose-300 flex items-start gap-2">
+                        <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-rose-600 dark:text-rose-400" />
+                        <div>
+                          <p className="font-semibold">Atención con el micrófono:</p>
+                          <p className="mt-0.5 leading-relaxed">{micPermissionError}</p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {showAnswer ? (
+                    <div className="pt-3 border-t border-stone-200 dark:border-stone-700 space-y-3">
+                      <p className="text-sm text-stone-800 dark:text-stone-100 leading-relaxed font-medium">
+                        {currentCard.answer}
+                      </p>
+                      <p className="text-xs text-amber-800 dark:text-amber-300 flex items-center gap-1.5">
+                        <Lightbulb className="w-4 h-4 shrink-0" />
+                        <span>{currentCard.mnemonicHint}</span>
+                      </p>
+                    </div>
+                  ) : null}
+
+                  <div className="pt-3 flex flex-wrap items-center justify-between gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setShowAnswer((prev) => !prev)}
+                      className="px-4 py-2 rounded-lg bg-stone-900 dark:bg-amber-500 text-white dark:text-stone-950 text-xs font-semibold hover:opacity-90 transition-opacity whitespace-nowrap shrink-0"
+                    >
+                      {showAnswer ? 'Ocultar respuesta' : 'Mostrar respuesta y truco visual'}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onToggleFlashcardMastered(currentCard.id);
+                        soundFX.playStepComplete();
+                      }}
+                      className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-stone-300 dark:border-stone-700 text-xs font-medium text-stone-700 dark:text-stone-200 hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors whitespace-nowrap shrink-0"
+                    >
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                      {currentCard.mastered ? 'Marcada como dominada' : 'Marcar como dominada (+20 PE)'}
+                    </button>
+                  </div>
                 </div>
-              ) : (
-                <p className="text-xs text-stone-500 dark:text-stone-400">
-                  Intenta responder en voz alta antes de descubrir la solución (Recuerdo Activo).
-                </p>
-              )}
-
-              <div className="pt-3 flex flex-wrap items-center justify-between gap-3">
-                <button
-                  type="button"
-                  onClick={() => setShowAnswer((prev) => !prev)}
-                  className="px-4 py-2 rounded-lg bg-stone-900 dark:bg-amber-500 text-white dark:text-stone-950 text-xs font-semibold hover:opacity-90 transition-opacity whitespace-nowrap shrink-0"
-                >
-                  {showAnswer ? 'Ocultar respuesta' : 'Mostrar respuesta y truco visual'}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    onToggleFlashcardMastered(currentCard.id);
-                    soundFX.playStepComplete();
-                  }}
-                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-stone-300 dark:border-stone-700 text-xs font-medium text-stone-700 dark:text-stone-200 hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors whitespace-nowrap shrink-0"
-                >
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-                  {currentCard.mastered ? 'Marcada como dominada' : 'Marcar como dominada (+20 PE)'}
-                </button>
-              </div>
-            </div>
+              );
+            })()}
 
             <div className="flex items-center justify-between">
               <button
                 type="button"
                 onClick={() => {
+                  if (isRecordingCardVoice) stopCardRecording(currentCard.id);
                   setShowAnswer(false);
                   setCardIndex((prev) => (prev - 1 + activeDeck.length) % activeDeck.length);
                 }}
@@ -526,6 +1015,7 @@ export const StudyStudio: React.FC<StudyStudioProps> = ({
               <button
                 type="button"
                 onClick={() => {
+                  if (isRecordingCardVoice) stopCardRecording(currentCard.id);
                   setShowAnswer(false);
                   setCardIndex((prev) => (prev + 1) % activeDeck.length);
                 }}
@@ -737,9 +1227,38 @@ export const StudyStudio: React.FC<StudyStudioProps> = ({
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-stone-700 dark:text-stone-300 mb-1">
-                  Paso 2: Explícalo con tus propias palabras sin copiar del libro
-                </label>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-xs font-semibold text-stone-700 dark:text-stone-300">
+                    Paso 2: Explícalo con tus propias palabras sin copiar del libro
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (isRecordingFeynman) {
+                        stopFeynmanRecording();
+                      } else {
+                        startFeynmanRecording();
+                      }
+                    }}
+                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold transition-all ${
+                      isRecordingFeynman
+                        ? 'bg-rose-600 text-white animate-pulse'
+                        : 'bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 hover:bg-amber-200 dark:hover:bg-amber-900 border border-amber-300/50 dark:border-amber-800/50'
+                    }`}
+                  >
+                    {isRecordingFeynman ? (
+                      <>
+                        <Square className="w-3.5 h-3.5 fill-current" />
+                        <span>Detener Grabación Oral</span>
+                      </>
+                    ) : (
+                      <>
+                        <Mic className="w-3.5 h-3.5" />
+                        <span>Grabar / Dictar Explicación</span>
+                      </>
+                    )}
+                  </button>
+                </div>
                 <textarea
                   rows={2}
                   value={feynmanSimpleExplanation}
@@ -747,8 +1266,32 @@ export const StudyStudio: React.FC<StudyStudioProps> = ({
                     setFeynmanSimpleExplanation(e.target.value);
                     setFeynmanVerified(false);
                   }}
+                  placeholder="Explícalo como si se lo contaras a un compañero o a tu hermano menor..."
                   className="w-full p-2.5 text-xs rounded-lg border border-stone-300 dark:border-stone-700 bg-stone-50 dark:bg-stone-800 text-stone-900 dark:text-white"
                 />
+                {feynmanAudioUrl && (
+                  <div className="mt-2 p-2 rounded-lg bg-stone-100 dark:bg-stone-800/80 border border-stone-200 dark:border-stone-700 flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 flex-1">
+                      <Volume2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                      <audio controls src={feynmanAudioUrl} className="h-7 w-full max-w-xs" />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        revokeUrl(feynmanAudioUrl);
+                        setFeynmanAudioUrl(null);
+                      }}
+                      className="text-xs text-stone-500 hover:text-rose-600 dark:hover:text-rose-400 font-medium"
+                    >
+                      Descartar audio
+                    </button>
+                  </div>
+                )}
+                {feynmanMicError && (
+                  <p className="mt-1 text-xs text-rose-600 dark:text-rose-400">
+                    {feynmanMicError}
+                  </p>
+                )}
               </div>
 
               <div>

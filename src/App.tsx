@@ -1453,7 +1453,7 @@ export default function App() {
           )}
 
           {/* TAB 3: TAREAS POR MICRO-PASOS Y TÉCNICAS DE ESTUDIO (POMODORO / FLASHCARDS / CORNELL) */}
-          {(activeTab === 'planner' || activeTab === 'study') && (
+          {activeTab === 'planner' && (
             <div className="space-y-10">
               {/* Micro-Steps Task Planner */}
               <div className="border border-stone-200 dark:border-stone-800 rounded-xl bg-white dark:bg-stone-900 p-6 space-y-6">
