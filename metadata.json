@@ -1,0 +1,6 @@
+{
+  "name": "ClotFocus - Apoyo TDAH IES Clot del Moro",
+  "description": "Plataforma educativa accesible de organización, estudio autónomo, recompensas anime y seguimiento familiar para alumnado con TDAH (1º ESO a 2º Bachillerato) del IES Clot del Moro en Algímia d'Alfara.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
