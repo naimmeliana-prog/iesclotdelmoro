@@ -1549,40 +1549,119 @@ const COURSE_BLUEPRINTS: Record<Exclude<CourseGrade, '1ESO'>, CourseBlueprint> =
   },
 };
 
-export function getSubjectsForCourse(course: CourseGrade): SyllabusSubject[] {
-  if (course === '1ESO') {
-    return FULL_SYLLABUS_SUBJECTS;
+export interface CustomCurriculumUnit {
+  id: string;
+  course: CourseGrade;
+  subjectId: string;
+  title: string;
+  summary: string;
+  keyConcepts: string[];
+  heading1: string;
+  detail1: string;
+  heading2: string;
+  detail2: string;
+  practicalExample: string;
+  quizQuestion: string;
+  quizOptions: [string, string, string];
+  correctIndex: number;
+  quizExplanation: string;
+  updatedAt: string;
+}
+
+export interface CurriculumManifestPayload {
+  version: string;
+  curriculumStandard: string;
+  autoSyncIntervalSeconds: number;
+  lastUpdatedLabel: string;
+  customUnits: CustomCurriculumUnit[];
+  customFlashcards: FlashcardItem[];
+}
+
+export function getSubjectsForCourse(
+  course: CourseGrade,
+  customUnits: CustomCurriculumUnit[] = []
+): SyllabusSubject[] {
+  const baseSubjects: SyllabusSubject[] =
+    course === '1ESO'
+      ? FULL_SYLLABUS_SUBJECTS
+      : COURSE_BLUEPRINTS[course].subjects.map((s) => ({
+          id: s.id,
+          name: s.name,
+          shortCode: s.shortCode,
+          courses: [course],
+          description: s.description,
+          totalUnits: s.units.length,
+          units: s.units.map((u, idx) => ({
+            id: `${s.id}-u${idx + 1}`,
+            unitNumber: idx + 1,
+            title: u.title,
+            summary: u.summary,
+            durationMin: 15,
+            studyPoints: 160,
+            keyConcepts: u.keyConcepts,
+            visualScheme: [u.scheme1, u.scheme2],
+            practicalExample: u.practicalExample,
+            quickQuiz: [
+              {
+                id: `${s.id}-u${idx + 1}-q1`,
+                question: u.quizQ,
+                options: u.quizOptions,
+                correctIndex: u.correctIndex,
+                explanation: u.quizExp,
+              },
+            ],
+          })),
+        }));
+
+  const courseCustom = customUnits.filter((cu) => cu.course === course);
+  if (courseCustom.length === 0) {
+    return baseSubjects;
   }
 
-  const bp = COURSE_BLUEPRINTS[course];
-  return bp.subjects.map((s) => ({
-    id: s.id,
-    name: s.name,
-    shortCode: s.shortCode,
-    courses: [course],
-    description: s.description,
-    totalUnits: s.units.length,
-    units: s.units.map((u, idx) => ({
-      id: `${s.id}-u${idx + 1}`,
-      unitNumber: idx + 1,
-      title: u.title,
-      summary: u.summary,
-      durationMin: 15,
-      studyPoints: 160,
-      keyConcepts: u.keyConcepts,
-      visualScheme: [u.scheme1, u.scheme2],
-      practicalExample: u.practicalExample,
-      quickQuiz: [
-        {
-          id: `${s.id}-u${idx + 1}-q1`,
-          question: u.quizQ,
-          options: u.quizOptions,
-          correctIndex: u.correctIndex,
-          explanation: u.quizExp,
-        },
-      ],
-    })),
-  }));
+  return baseSubjects.map((subj) => {
+    const matchingCustom = courseCustom.filter((cu) => cu.subjectId === subj.id);
+    if (matchingCustom.length === 0) return subj;
+
+    const mergedUnits = [...subj.units];
+    matchingCustom.forEach((cu) => {
+      const existingIdx = mergedUnits.findIndex((u) => u.id === cu.id);
+      const formattedUnit = {
+        id: cu.id,
+        unitNumber: existingIdx >= 0 ? mergedUnits[existingIdx].unitNumber : mergedUnits.length + 1,
+        title: cu.title,
+        summary: cu.summary,
+        durationMin: 15,
+        studyPoints: 160,
+        keyConcepts: cu.keyConcepts,
+        visualScheme: [
+          { heading: cu.heading1, detail: cu.detail1 },
+          { heading: cu.heading2, detail: cu.detail2 },
+        ],
+        practicalExample: cu.practicalExample,
+        quickQuiz: [
+          {
+            id: `${cu.id}-q1`,
+            question: cu.quizQuestion,
+            options: cu.quizOptions,
+            correctIndex: cu.correctIndex,
+            explanation: cu.quizExplanation,
+          },
+        ],
+      };
+
+      if (existingIdx >= 0) {
+        mergedUnits[existingIdx] = formattedUnit;
+      } else {
+        mergedUnits.push(formattedUnit);
+      }
+    });
+
+    return {
+      ...subj,
+      totalUnits: mergedUnits.length,
+      units: mergedUnits,
+    };
+  });
 }
 
 export function getFlashcardsForCourse(course: CourseGrade): FlashcardItem[] {
@@ -1601,8 +1680,11 @@ export function getFlashcardsForCourse(course: CourseGrade): FlashcardItem[] {
   }));
 }
 
-export function getInitialGradesForCourse(course: CourseGrade): SubjectGradeMetric[] {
-  const subjects = getSubjectsForCourse(course);
+export function getInitialGradesForCourse(
+  course: CourseGrade,
+  customUnits: CustomCurriculumUnit[] = []
+): SubjectGradeMetric[] {
+  const subjects = getSubjectsForCourse(course, customUnits);
   return subjects.map((s) => ({
     subject: s.name,
     course,
@@ -1614,3 +1696,34 @@ export function getInitialGradesForCourse(course: CourseGrade): SubjectGradeMetr
     teacherComment: 'Sin calificaciones registradas',
   }));
 }
+
+export function syncGradesWithCurriculum(
+  existingGrades: SubjectGradeMetric[],
+  customUnits: CustomCurriculumUnit[] = []
+): SubjectGradeMetric[] {
+  const allCourses: CourseGrade[] = ['1ESO', '2ESO', '3ESO', '4ESO', '1BACH', '2BACH'];
+  const freshTemplate = allCourses.flatMap((c) => getInitialGradesForCourse(c, customUnits));
+  return freshTemplate.map((tmpl) => {
+    const found = existingGrades.find(
+      (g) => g.course === tmpl.course && g.subject === tmpl.subject
+    );
+    return found ? found : tmpl;
+  });
+}
+
+export function syncFlashcardsWithCurriculum(
+  existingCards: FlashcardItem[],
+  manifestCards: FlashcardItem[] = []
+): FlashcardItem[] {
+  const allCourses: CourseGrade[] = ['1ESO', '2ESO', '3ESO', '4ESO', '1BACH', '2BACH'];
+  const freshBase = [...allCourses.flatMap((c) => getFlashcardsForCourse(c)), ...manifestCards];
+  const merged = freshBase.map((baseCard) => {
+    const prev = existingCards.find((c) => c.id === baseCard.id);
+    return prev ? { ...baseCard, mastered: prev.mastered } : baseCard;
+  });
+  const userCreated = existingCards.filter(
+    (c) => !freshBase.some((b) => b.id === c.id)
+  );
+  return [...userCreated, ...merged];
+}
+

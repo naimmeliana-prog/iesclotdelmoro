@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   ANIME_WORLDS,
   COURSE_METADATA,
@@ -12,9 +12,13 @@ import {
   TEACHER_ADAPTATIONS,
 } from './data/clotDelMoroData';
 import {
+  CurriculumManifestPayload,
+  CustomCurriculumUnit,
   getFlashcardsForCourse,
   getInitialGradesForCourse,
   getSubjectsForCourse,
+  syncFlashcardsWithCurriculum,
+  syncGradesWithCurriculum,
 } from './data/courseCurricula';
 import {
   ActiveTab,
@@ -39,6 +43,10 @@ import { CurriculumAndModules } from './components/CurriculumAndModules';
 import { AnalyticsAndFamily } from './components/AnalyticsAndFamily';
 import { soundFX } from './utils/sound';
 import {
+  buildDefaultCourseSubjectsMap,
+  computeCatalogSignature,
+} from './utils/syllabusUpdater';
+import {
   Bell,
   BookOpen,
   CheckCircle2,
@@ -46,6 +54,7 @@ import {
   Lock,
   Moon,
   Plus,
+  RefreshCw,
   ShieldAlert,
   Sun,
   Volume2,
@@ -71,6 +80,20 @@ export default function App() {
   const [selectedCourse, setSelectedCourse] = useState<CourseGrade>('1ESO');
   const [activeRole, setActiveRole] = useState<UserRole>('STUDENT');
   const [selectedSubjectForCurriculum, setSelectedSubjectForCurriculum] = useState<string>('subj-bio');
+
+  // --- AUTOMATIC CURRICULUM & CONTENT LIVE-SYNC STATE ---
+  const [customUnits, setCustomUnits] = useState<CustomCurriculumUnit[]>(() => {
+    try {
+      const saved = localStorage.getItem('clotfocus_live_units_v4');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [curriculumVersion, setCurriculumVersion] = useState<string>('2025.05.1');
+  const [lastCurriculumSync, setLastCurriculumSync] = useState<string>(() =>
+    new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  );
 
   const [selectedWorld, setSelectedWorld] = useState<AnimeWorldId>(() => {
     const saved = localStorage.getItem('clotfocus_world_v4');
@@ -155,10 +178,15 @@ export default function App() {
     return saved ? JSON.parse(saved) : INITIAL_WEEKLY_STUDY_METRICS;
   });
 
-  // Subject grades start at null (sin calificar) across all courses and subjects
+  // Subject grades start at null (sin calificar) across all courses and subjects, synced with curriculum
   const [subjectGrades, setSubjectGrades] = useState<SubjectGradeMetric[]>(() => {
-    const saved = localStorage.getItem('clotfocus_grades_v4');
-    return saved ? JSON.parse(saved) : ALL_INITIAL_GRADES;
+    try {
+      const saved = localStorage.getItem('clotfocus_grades_v4');
+      const parsed = saved ? JSON.parse(saved) : [];
+      return syncGradesWithCurriculum(parsed);
+    } catch {
+      return ALL_INITIAL_GRADES;
+    }
   });
 
   // Platforms start disconnected (connected: false)
@@ -173,8 +201,13 @@ export default function App() {
   });
 
   const [flashcards, setFlashcards] = useState<FlashcardItem[]>(() => {
-    const saved = localStorage.getItem('clotfocus_flashcards_v4');
-    return saved ? JSON.parse(saved) : ALL_INITIAL_FLASHCARDS;
+    try {
+      const saved = localStorage.getItem('clotfocus_flashcards_v4');
+      const parsed = saved ? JSON.parse(saved) : [];
+      return syncFlashcardsWithCurriculum(parsed);
+    } catch {
+      return ALL_INITIAL_FLASHCARDS;
+    }
   });
 
   const [cornellNotes, setCornellNotes] = useState<CornellNote[]>(() => {
@@ -191,8 +224,8 @@ export default function App() {
   const [showNotificationPanel, setShowNotificationPanel] = useState<boolean>(false);
   const [pushPermissionStatus, setPushPermissionStatus] = useState<string>('ACTIVO');
 
-  // Dynamic subjects for the currently selected course (1º ESO .. 2º Bach)
-  const currentCourseSubjects = getSubjectsForCourse(selectedCourse);
+  // Dynamic subjects for the currently selected course (1º ESO .. 2º Bach), including any live updates
+  const currentCourseSubjects = getSubjectsForCourse(selectedCourse, customUnits);
 
   // --- PLANNER / NEW TASK FORM STATE ---
   const [taskFilter, setTaskFilter] = useState<'PENDING' | 'COMPLETED' | 'ALL'>('ALL');
@@ -206,15 +239,154 @@ export default function App() {
   // Toast feedback banner
   const [toastBanner, setToastBanner] = useState<string | null>(null);
 
+  const triggerToast = useCallback((message: string) => {
+    setToastBanner(message);
+    window.setTimeout(() => {
+      setToastBanner((prev) => (prev === message ? null : prev));
+    }, 5000);
+  }, []);
+
+  // --- AUTOMATIC CURRICULUM MANIFEST & CODE-SIGNATURE LIVE SYNC ENGINE ---
+  const checkAndSyncCurriculumUpdates = useCallback(
+    async (showNotification = false) => {
+      const nowStr = new Date().toLocaleTimeString([], {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+      });
+
+      // 1. Check code-level curriculum catalog signature so any edits to courseCurricula.ts or clotDelMoroData.ts auto-update
+      const currentCodeSig = computeCatalogSignature(buildDefaultCourseSubjectsMap());
+      const savedCodeSig = localStorage.getItem('clotfocus_catalog_sig_v4');
+      const codeCatalogChanged = savedCodeSig !== currentCodeSig;
+      if (codeCatalogChanged) {
+        localStorage.setItem('clotfocus_catalog_sig_v4', currentCodeSig);
+      }
+
+      try {
+        const res = await fetch(`/curriculum-manifest.json?t=${Date.now()}`, {
+          cache: 'no-store',
+        });
+        if (res.ok) {
+          const manifest: CurriculumManifestPayload = await res.json();
+          setLastCurriculumSync(nowStr);
+
+          if (manifest.version) {
+            setCurriculumVersion(manifest.version);
+          }
+
+          if (Array.isArray(manifest.customUnits) && manifest.customUnits.length > 0) {
+            setCustomUnits((prev) => {
+              const merged = [...prev];
+              let changed = false;
+              manifest.customUnits.forEach((mu) => {
+                const idx = merged.findIndex((u) => u.id === mu.id);
+                if (idx === -1) {
+                  merged.push(mu);
+                  changed = true;
+                } else if (JSON.stringify(merged[idx]) !== JSON.stringify(mu)) {
+                  merged[idx] = mu;
+                  changed = true;
+                }
+              });
+              return changed ? merged : prev;
+            });
+          }
+
+          setFlashcards((prev) =>
+            syncFlashcardsWithCurriculum(prev, manifest.customFlashcards || [])
+          );
+          setSubjectGrades((prev) => syncGradesWithCurriculum(prev, customUnits));
+
+          if (showNotification || (codeCatalogChanged && savedCodeSig !== null)) {
+            triggerToast(
+              `Temarios y contenidos sincronizados automáticamente (Versión ${manifest.version} · ${nowStr}).`
+            );
+          }
+        }
+      } catch {
+        // Offline or local fallback: still ensure local grades and flashcards match current code blueprint
+        setLastCurriculumSync(nowStr);
+        setFlashcards((prev) => syncFlashcardsWithCurriculum(prev));
+        setSubjectGrades((prev) => syncGradesWithCurriculum(prev, customUnits));
+      }
+    },
+    [customUnits, triggerToast]
+  );
+
+  useEffect(() => {
+    checkAndSyncCurriculumUpdates(false);
+
+    const intervalId = window.setInterval(() => {
+      checkAndSyncCurriculumUpdates(false);
+    }, 30000);
+
+    const handleVisibilityOrFocus = () => {
+      if (document.visibilityState === 'visible') {
+        checkAndSyncCurriculumUpdates(false);
+      }
+    };
+
+    const handleStorageSync = (e: StorageEvent) => {
+      if (e.key === 'clotfocus_live_units_v4' && e.newValue) {
+        try {
+          const updatedUnits: CustomCurriculumUnit[] = JSON.parse(e.newValue);
+          setCustomUnits(updatedUnits);
+          setSubjectGrades((prev) => syncGradesWithCurriculum(prev, updatedUnits));
+          setLastCurriculumSync(
+            new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+          );
+          triggerToast('¡Actualización automática de temario recibida en tiempo real!');
+        } catch {
+          // Ignore malformed JSON
+        }
+      }
+    };
+
+    window.addEventListener('focus', handleVisibilityOrFocus);
+    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
+    window.addEventListener('online', () => checkAndSyncCurriculumUpdates(true));
+    window.addEventListener('storage', handleStorageSync);
+
+    let channel: BroadcastChannel | null = null;
+    if ('BroadcastChannel' in window) {
+      channel = new BroadcastChannel('clotfocus_curriculum_sync');
+      channel.onmessage = (event) => {
+        if (event.data && event.data.type === 'CURRICULUM_UPDATED') {
+          setCustomUnits(event.data.units);
+          setSubjectGrades((prev) => syncGradesWithCurriculum(prev, event.data.units));
+          setLastCurriculumSync(
+            new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+          );
+          triggerToast(`Temario actualizado automáticamente: "${event.data.latestTitle}"`);
+        }
+      };
+    }
+
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener('focus', handleVisibilityOrFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
+      window.removeEventListener('storage', handleStorageSync);
+      if (channel) channel.close();
+    };
+  }, [checkAndSyncCurriculumUpdates, triggerToast]);
+
   // --- PERSISTENCE EFFECTS ---
   useEffect(() => {
     localStorage.setItem('clotfocus_dark_v4', JSON.stringify(darkMode));
     if (darkMode) {
       document.documentElement.classList.add('dark');
+      document.body.classList.add('dark');
     } else {
       document.documentElement.classList.remove('dark');
+      document.body.classList.remove('dark');
     }
   }, [darkMode]);
+
+  useEffect(() => {
+    localStorage.setItem('clotfocus_live_units_v4', JSON.stringify(customUnits));
+  }, [customUnits]);
 
   useEffect(() => {
     localStorage.setItem('clotfocus_world_v4', selectedWorld);
@@ -284,16 +456,58 @@ export default function App() {
     localStorage.setItem('clotfocus_adaptations_v4', JSON.stringify(teacherAdaptations));
   }, [teacherAdaptations]);
 
-  const triggerToast = (message: string) => {
-    setToastBanner(message);
-    window.setTimeout(() => {
-      setToastBanner((prev) => (prev === message ? null : prev));
-    }, 5000);
+  const handlePublishCurriculumUnit = (newUnit: CustomCurriculumUnit) => {
+    setCustomUnits((prev) => {
+      const existingIdx = prev.findIndex((u) => u.id === newUnit.id);
+      const next =
+        existingIdx >= 0
+          ? prev.map((u, idx) => (idx === existingIdx ? newUnit : u))
+          : [...prev, newUnit];
+      if ('BroadcastChannel' in window) {
+        const bc = new BroadcastChannel('clotfocus_curriculum_sync');
+        bc.postMessage({
+          type: 'CURRICULUM_UPDATED',
+          units: next,
+          latestTitle: newUnit.title,
+        });
+        bc.close();
+      }
+      setSubjectGrades((prevGrades) => syncGradesWithCurriculum(prevGrades, next));
+      return next;
+    });
+    const nowStr = new Date().toLocaleTimeString([], {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    });
+    setLastCurriculumSync(nowStr);
+    // Also create or update the flashcard automatically for the unit so study tools stay in sync
+    const matchingSubj = currentCourseSubjects.find((s) => s.id === newUnit.subjectId);
+    const liveCardId = `fc-live-${newUnit.id}`;
+    const updatedCard: FlashcardItem = {
+      id: liveCardId,
+      course: newUnit.course,
+      subject: matchingSubj ? matchingSubj.name : 'Temario Actualizado',
+      question: newUnit.quizQuestion,
+      answer: newUnit.quizOptions[newUnit.correctIndex],
+      mnemonicHint: newUnit.summary,
+      mastered: false,
+    };
+    setFlashcards((prev) => {
+      const idx = prev.findIndex((c) => c.id === liveCardId);
+      if (idx >= 0) {
+        return prev.map((c, i) => (i === idx ? { ...updatedCard, mastered: c.mastered } : c));
+      }
+      return [updatedCard, ...prev];
+    });
+    triggerToast(
+      `Contenido "${newUnit.title}" actualizado y sincronizado automáticamente en Temarios, Panel y Flashcards.`
+    );
   };
 
   const handleSelectCourse = (grade: CourseGrade) => {
     setSelectedCourse(grade);
-    const nextSubjects = getSubjectsForCourse(grade);
+    const nextSubjects = getSubjectsForCourse(grade, customUnits);
     if (nextSubjects.length > 0) {
       setSelectedSubjectForCurriculum(nextSubjects[0].id);
       setNewTaskSubject(nextSubjects[0].name);
@@ -535,15 +749,33 @@ export default function App() {
   const completedCountTotal = Object.keys(completedUnits).filter((k) => completedUnits[k]).length;
   const connectedPlatformsCount = platforms.filter((p) => p.connected).length;
 
+  const handleToggleDarkMode = () => {
+    const nextDark = !darkMode;
+    setDarkMode(nextDark);
+    if (nextDark) {
+      document.documentElement.classList.add('dark');
+      document.body.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+      document.body.classList.remove('dark');
+    }
+    soundFX.playStepComplete();
+    triggerToast(
+      nextDark
+        ? 'Modo Oscuro activado para reducir la fatiga visual.'
+        : 'Modo Claro cálido activado.'
+    );
+  };
+
   return (
     <div className={darkMode ? 'dark' : ''}>
       {/* Warm, welcoming neutral canvas (#FDFBF7 in light mode, warm stone-950 in dark mode) */}
-      <div className="min-h-screen bg-[#FDFBF7] dark:bg-stone-950 text-stone-900 dark:text-stone-100 transition-colors">
+      <div className="theme-canvas min-h-screen bg-stone-50 dark:bg-stone-950 text-stone-900 dark:text-stone-100 transition-colors duration-200">
         {/* =====================================================================
             TOP BAR CONTRACT: Strictly 3 Zones separated by gap-8
             Zone 1: Single brand wordmark | Zone 2: 5 single-line nav links | Zone 3: 1 primary CTA
             ===================================================================== */}
-        <header className="sticky top-0 z-30 bg-[#FDFBF7]/95 dark:bg-stone-900/95 backdrop-blur-xs border-b border-stone-200 dark:border-stone-800">
+        <header className="theme-header sticky top-0 z-30 bg-stone-50/95 dark:bg-stone-900/95 backdrop-blur-xs border-b border-stone-200 dark:border-stone-800">
           <div className="max-w-7xl mx-auto flex items-center justify-between gap-8 px-6 py-4">
             {/* Zone 1: Brand Title */}
             <a
@@ -670,6 +902,17 @@ export default function App() {
 
               {/* Right: Parental Multiplier X Quick Indicator, Role Switcher, Alerts & Dark Mode */}
               <div className="flex flex-wrap items-center gap-2.5">
+                {/* Auto-Sync Indicator Button */}
+                <button
+                  type="button"
+                  onClick={() => checkAndSyncCurriculumUpdates(true)}
+                  title="Sincronización automática de temarios activa"
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-emerald-300 dark:border-emerald-800 bg-emerald-50/70 dark:bg-emerald-950/40 text-xs font-mono text-emerald-900 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition-colors whitespace-nowrap shrink-0"
+                >
+                  <RefreshCw className="w-3.5 h-3.5 text-emerald-700 dark:text-emerald-400" />
+                  <span>Auto-Sync ({lastCurriculumSync})</span>
+                </button>
+
                 {/* Quick Parental X Ratio Button (Requires Parent Login to change) */}
                 <button
                   type="button"
@@ -734,7 +977,7 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => setShowNotificationPanel((prev) => !prev)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-800 text-xs font-medium text-stone-700 dark:text-stone-200 hover:bg-stone-50 transition-colors whitespace-nowrap shrink-0"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-800 text-xs font-medium text-stone-700 dark:text-stone-200 hover:bg-stone-50 dark:hover:bg-stone-700 transition-colors whitespace-nowrap shrink-0"
                 >
                   <Bell className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
                   <span>Alertas ({unreadNotifCount})</span>
@@ -749,7 +992,7 @@ export default function App() {
                     soundFX.muted = nextMuted;
                   }}
                   aria-label={soundMuted ? 'Activar sonidos' : 'Silenciar sonidos'}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-800 text-xs font-medium text-stone-700 dark:text-stone-200 hover:bg-stone-50 transition-colors whitespace-nowrap shrink-0"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-800 text-xs font-medium text-stone-700 dark:text-stone-200 hover:bg-stone-50 dark:hover:bg-stone-700 transition-colors whitespace-nowrap shrink-0"
                 >
                   {soundMuted ? (
                     <VolumeX className="w-3.5 h-3.5" />
@@ -762,8 +1005,9 @@ export default function App() {
                 {/* Dark Mode Accessibility Button */}
                 <button
                   type="button"
-                  onClick={() => setDarkMode((prev) => !prev)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-800 text-xs font-semibold text-stone-800 dark:text-stone-100 hover:bg-stone-50 transition-colors whitespace-nowrap shrink-0"
+                  onClick={handleToggleDarkMode}
+                  aria-pressed={darkMode}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-stone-300 dark:border-amber-500/70 bg-white dark:bg-stone-800 text-xs font-semibold text-stone-800 dark:text-amber-300 hover:bg-stone-100 dark:hover:bg-stone-700 transition-colors whitespace-nowrap shrink-0 cursor-pointer shadow-2xs"
                 >
                   {darkMode ? (
                     <Sun className="w-3.5 h-3.5 text-amber-400" />
@@ -773,6 +1017,30 @@ export default function App() {
                   <span>{darkMode ? 'Modo Claro' : 'Modo Oscuro'}</span>
                 </button>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* Minimal Accessibility Strip when Distraction-Free Mode is active */}
+        {distractionFreeMode && (
+          <div className="border-b border-stone-200 dark:border-stone-800 bg-stone-100/70 dark:bg-stone-900/80">
+            <div className="max-w-7xl mx-auto px-6 py-2 flex items-center justify-between gap-4">
+              <span className="text-xs font-medium text-stone-600 dark:text-stone-300">
+                Modo Sin Distracciones Activo · {courseMeta.label} · Auto-Sync ({lastCurriculumSync})
+              </span>
+              <button
+                type="button"
+                onClick={handleToggleDarkMode}
+                aria-pressed={darkMode}
+                className="flex items-center gap-1.5 px-3 py-1 rounded-lg border border-stone-300 dark:border-amber-500/70 bg-white dark:bg-stone-800 text-xs font-semibold text-stone-800 dark:text-amber-300 hover:bg-stone-100 dark:hover:bg-stone-700 transition-colors cursor-pointer"
+              >
+                {darkMode ? (
+                  <Sun className="w-3.5 h-3.5 text-amber-400" />
+                ) : (
+                  <Moon className="w-3.5 h-3.5 text-stone-700" />
+                )}
+                <span>{darkMode ? 'Modo Claro' : 'Modo Oscuro'}</span>
+              </button>
             </div>
           </div>
         )}
@@ -900,13 +1168,13 @@ export default function App() {
                       <span aria-hidden="true"> · </span>
                       <span>{courseMeta.stage}</span>
                       <span aria-hidden="true"> · </span>
-                      <span>Reto del curso: {courseMeta.keyChallenge}</span>
+                      <span>Auto-Sync v{curriculumVersion} ({lastCurriculumSync})</span>
                     </div>
                     <h1 className="text-2xl sm:text-3xl font-bold text-stone-900 dark:text-white tracking-tight mt-1">
                       Asignaturas y Temarios de {courseMeta.label} ({currentCourseSubjects.length} Materias)
                     </h1>
                     <p className="text-xs sm:text-sm text-stone-600 dark:text-stone-300 mt-1">
-                      Haz clic en cualquier asignatura de <strong>{courseMeta.label}</strong> para abrir sus unidades, esquemas visuales TDAH y test de autoevaluación. Si cambias de curso arriba (1º ESO a 2º Bach), cambian automáticamente todas las asignaturas y unidades.
+                      Haz clic en cualquier asignatura de <strong>{courseMeta.label}</strong> para abrir sus unidades, esquemas visuales TDAH y test de autoevaluación. El contenido se sincroniza automáticamente cuando hay cambios o nuevas unidades.
                     </p>
                   </div>
 
@@ -1161,7 +1429,7 @@ export default function App() {
                     {currentCourseSubjects.length} Materias
                   </div>
                   <p className="text-xs text-emerald-700 dark:text-emerald-400 mt-1">
-                    Temario específico de {courseMeta.label}
+                    Auto-actualización activa (v{curriculumVersion})
                   </p>
                 </div>
               </div>
@@ -1176,6 +1444,11 @@ export default function App() {
               studyRatioX={studyRatioX}
               completedUnits={completedUnits}
               onCompleteLessonReward={handleCompleteLessonReward}
+              customUnits={customUnits}
+              onPublishCurriculumUnit={handlePublishCurriculumUnit}
+              curriculumVersion={curriculumVersion}
+              lastCurriculumSync={lastCurriculumSync}
+              onForceSyncCurriculum={() => checkAndSyncCurriculumUpdates(true)}
             />
           )}
 
@@ -1618,7 +1891,7 @@ export default function App() {
               ClotFocus · Programa de Inclusión y Apoyo al Alumnado con TDAH (1º ESO a 2º Bachillerato) · IES Clot del Moro, Algímia d'Alfara
             </span>
             <span>
-              Temarios por Curso (1º ESO a 2º Bach) · Control Parental con Contraseña · Listo para GitHub y Vercel
+              Auto-Sync Temarios v{curriculumVersion} ({lastCurriculumSync}) · Control Parental · Listo para GitHub y Vercel
             </span>
           </div>
         </footer>

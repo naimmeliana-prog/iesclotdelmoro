@@ -1,0 +1,9 @@
+{
+  "version": "2026.10.23-r2",
+  "institution": "IES Clot del Moro · Algímia d'Alfara",
+  "curriculumStandard": "LOMLOE · Decreto 107/2022 y 108/2022 Conselleria d'Educació GVA",
+  "autoUpdateIntervalSeconds": 30,
+  "coursesIncluded": ["1ESO", "2ESO", "3ESO", "4ESO", "1BACH", "2BACH"],
+  "lastUpdatedLabel": "Sincronizado automáticamente con el catálogo curricular oficial GVA",
+  "liveAdditions": []
+}
