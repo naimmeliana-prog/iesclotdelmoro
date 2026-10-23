@@ -117,6 +117,8 @@ export const AnalyticsAndFamily: React.FC<AnalyticsAndFamilyProps> = ({
   const [newRewardCost, setNewRewardCost] = useState<number>(300);
   const [showLtiPayloadPreview, setShowLtiPayloadPreview] = useState<boolean>(false);
 
+  const isConfigured = Boolean(parentCredentials && parentCredentials.isConfigured);
+
   const handleParentAuthSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError('');
@@ -125,7 +127,7 @@ export const AnalyticsAndFamily: React.FC<AnalyticsAndFamilyProps> = ({
       return;
     }
 
-    if (!parentCredentials.isConfigured) {
+    if (!isConfigured) {
       onConfigureParentCredentials(inputParentUser.trim(), inputParentPass);
       setInputParentUser('');
       setInputParentPass('');
@@ -193,6 +195,9 @@ export const AnalyticsAndFamily: React.FC<AnalyticsAndFamilyProps> = ({
       ? teacherAdaptations
       : teacherAdaptations.filter((item) => item.stage === stageFilter);
 
+  const courseSpecificGrades = subjectGrades.filter((g) => g.course === selectedCourse);
+  const displayedGrades = courseSpecificGrades.length > 0 ? courseSpecificGrades : subjectGrades;
+
   const totalWeeklyFocus = weeklyMetrics.reduce((acc, d) => acc + d.focusMinutes, 0);
   const totalWeeklySteps = weeklyMetrics.reduce((acc, d) => acc + d.microStepsDone, 0);
 
@@ -221,7 +226,7 @@ export const AnalyticsAndFamily: React.FC<AnalyticsAndFamilyProps> = ({
             {isParentAuthenticated && (
               <>
                 <span className="text-xs font-mono text-emerald-800 dark:text-emerald-300">
-                  ✓ Sesión iniciada: <strong>{parentCredentials.username}</strong>
+                  ✓ Sesión iniciada: <strong>{parentCredentials?.username}</strong>
                 </span>
                 <button
                   type="button"
@@ -245,14 +250,14 @@ export const AnalyticsAndFamily: React.FC<AnalyticsAndFamilyProps> = ({
             <div className="flex items-center gap-2 text-sm font-bold text-stone-900 dark:text-white">
               <KeyRound className="w-4 h-4 text-amber-600" />
               <span>
-                {!parentCredentials.isConfigured
+                {!isConfigured
                   ? 'Configura por primera vez el Usuario y Contraseña de la Madre / Padre'
                   : 'Inicia sesión con el Usuario y Contraseña de la Madre / Padre'}
               </span>
             </div>
 
             <p className="text-xs text-stone-600 dark:text-stone-300">
-              {!parentCredentials.isConfigured
+              {!isConfigured
                 ? 'Crea tu cuenta parental para que solo tú puedas decidir el valor de X (duración del minijuego según el tiempo de estudio) y activar o bloquear el Modo Sin Distracciones y el Modo Enfoque.'
                 : `Actualmente el factor está bloqueado en X = ${studyRatioX}. Introduce tus credenciales parentales para modificar la duración del juego o activar el Modo Sin Distracciones / Enfoque.`}
             </p>
@@ -296,7 +301,7 @@ export const AnalyticsAndFamily: React.FC<AnalyticsAndFamilyProps> = ({
               type="submit"
               className="px-5 py-2.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold transition-colors"
             >
-              {!parentCredentials.isConfigured
+              {!isConfigured
                 ? 'Guardar Usuario y Contraseña y Entrar'
                 : 'Acceder al Panel Parental'}
             </button>
@@ -689,10 +694,10 @@ git push -u origin main
               </tr>
             </thead>
             <tbody className="divide-y divide-stone-200 dark:divide-stone-800 text-xs">
-              {subjectGrades.map((row) => {
+              {displayedGrades.map((row) => {
                 const isEditing = editingSubject === row.subject;
                 return (
-                  <React.Fragment key={row.subject}>
+                  <React.Fragment key={`${row.course}-${row.subject}`}>
                     <tr className="hover:bg-stone-50/80 dark:hover:bg-stone-800/40">
                       <td className="py-2.5 pr-3 font-semibold text-stone-900 dark:text-white">
                         {row.subject}

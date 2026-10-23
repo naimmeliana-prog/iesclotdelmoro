@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import {
   COURSE_METADATA,
-  FULL_SYLLABUS_SUBJECTS,
   MATH_1ESO_INTERACTIVE_MODULE,
 } from '../data/clotDelMoroData';
+import { getSubjectsForCourse } from '../data/courseCurricula';
 import { CourseGrade } from '../types';
 import { soundFX } from '../utils/sound';
 import {
@@ -28,26 +28,32 @@ export const CurriculumAndModules: React.FC<CurriculumAndModulesProps> = ({
   onCompleteLessonReward,
 }) => {
   const courseMeta = COURSE_METADATA[selectedCourse];
+  const courseSubjects = getSubjectsForCourse(selectedCourse);
 
   const [selectedSubjectId, setSelectedSubjectId] = useState<string>(
-    initialSubjectId || FULL_SYLLABUS_SUBJECTS[0].id
+    initialSubjectId && courseSubjects.some((s) => s.id === initialSubjectId)
+      ? initialSubjectId
+      : courseSubjects[0].id
   );
 
-  useEffect(() => {
-    if (initialSubjectId) {
-      setSelectedSubjectId(initialSubjectId);
-      const found = FULL_SYLLABUS_SUBJECTS.find((s) => s.id === initialSubjectId);
-      if (found && found.units.length > 0) {
-        setSelectedUnitId(found.units[0].id);
-      }
-    }
-  }, [initialSubjectId]);
-
   const currentSubject =
-    FULL_SYLLABUS_SUBJECTS.find((s) => s.id === selectedSubjectId) || FULL_SYLLABUS_SUBJECTS[0];
+    courseSubjects.find((s) => s.id === selectedSubjectId) || courseSubjects[0];
 
   const [selectedUnitId, setSelectedUnitId] = useState<string>(currentSubject.units[0].id);
   const [showMathInteractiveModule, setShowMathInteractiveModule] = useState<boolean>(false);
+
+  // Sync when selectedCourse or initialSubjectId changes
+  useEffect(() => {
+    const subjectsForNewCourse = getSubjectsForCourse(selectedCourse);
+    const matchingSubject =
+      (initialSubjectId && subjectsForNewCourse.find((s) => s.id === initialSubjectId)) ||
+      subjectsForNewCourse[0];
+    setSelectedSubjectId(matchingSubject.id);
+    if (matchingSubject.units.length > 0) {
+      setSelectedUnitId(matchingSubject.units[0].id);
+    }
+    setShowMathInteractiveModule(false);
+  }, [selectedCourse, initialSubjectId]);
 
   // State for unit quizzes
   const [unitQuizAnswers, setUnitQuizAnswers] = useState<Record<string, number>>({});
@@ -62,20 +68,14 @@ export const CurriculumAndModules: React.FC<CurriculumAndModulesProps> = ({
   const currentUnit =
     currentSubject.units.find((u) => u.id === selectedUnitId) || currentSubject.units[0];
 
-  const calculatedBreakMinForUnit = Math.max(
-    1,
-    Math.round(currentUnit.durationMin * studyRatioX)
-  );
+  const calculatedBreakMinForUnit = Math.round(currentUnit.durationMin * studyRatioX);
 
   const currentLesson = MATH_1ESO_INTERACTIVE_MODULE[activeLessonIndex];
-  const calculatedBreakMinForLesson = Math.max(
-    1,
-    Math.round(currentLesson.durationMin * studyRatioX)
-  );
+  const calculatedBreakMinForLesson = Math.round(currentLesson.durationMin * studyRatioX);
 
   const handleSelectSubject = (subjId: string) => {
     setSelectedSubjectId(subjId);
-    const subj = FULL_SYLLABUS_SUBJECTS.find((s) => s.id === subjId);
+    const subj = courseSubjects.find((s) => s.id === subjId);
     if (subj && subj.units.length > 0) {
       setSelectedUnitId(subj.units[0].id);
     }
@@ -113,7 +113,7 @@ export const CurriculumAndModules: React.FC<CurriculumAndModulesProps> = ({
               Temarios Oficiales Completos · {courseMeta.label} · IES Clot del Moro (Algímia d'Alfara)
             </p>
             <h2 className="text-2xl font-bold text-stone-900 dark:text-white mt-0.5">
-              Todas las Asignaturas del Curso ({FULL_SYLLABUS_SUBJECTS.length} Materias Disponibles)
+              Todas las Asignaturas de {courseMeta.label} ({courseSubjects.length} Materias)
             </h2>
           </div>
           <div className="text-xs font-mono tabular-nums text-stone-600 dark:text-stone-300">
@@ -121,9 +121,9 @@ export const CurriculumAndModules: React.FC<CurriculumAndModulesProps> = ({
           </div>
         </div>
 
-        {/* Grid of ALL 9 Subjects */}
+        {/* Grid of Course Subjects */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
-          {FULL_SYLLABUS_SUBJECTS.map((subj) => {
+          {courseSubjects.map((subj) => {
             const isSelected = subj.id === selectedSubjectId;
             const completedInSubj = subj.units.filter((u) => completedUnits[u.id]).length;
             return (

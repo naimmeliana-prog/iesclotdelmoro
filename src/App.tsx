@@ -2,18 +2,20 @@ import React, { useState, useEffect } from 'react';
 import {
   ANIME_WORLDS,
   COURSE_METADATA,
-  FULL_SYLLABUS_SUBJECTS,
   INITIAL_CORNELL_NOTES,
-  INITIAL_FLASHCARDS,
   INITIAL_NOTIFICATIONS,
   INITIAL_PARENT_REWARDS,
   INITIAL_PLATFORMS,
-  INITIAL_SUBJECT_GRADES_METRICS,
   INITIAL_TASKS,
   INITIAL_VIRTUAL_SHOP_ITEMS,
   INITIAL_WEEKLY_STUDY_METRICS,
   TEACHER_ADAPTATIONS,
 } from './data/clotDelMoroData';
+import {
+  getFlashcardsForCourse,
+  getInitialGradesForCourse,
+  getSubjectsForCourse,
+} from './data/courseCurricula';
 import {
   ActiveTab,
   AnimeWorldId,
@@ -50,10 +52,18 @@ import {
   VolumeX,
 } from 'lucide-react';
 
+const ALL_COURSES: CourseGrade[] = ['1ESO', '2ESO', '3ESO', '4ESO', '1BACH', '2BACH'];
+const ALL_INITIAL_FLASHCARDS: FlashcardItem[] = ALL_COURSES.flatMap((c) =>
+  getFlashcardsForCourse(c)
+);
+const ALL_INITIAL_GRADES: SubjectGradeMetric[] = ALL_COURSES.flatMap((c) =>
+  getInitialGradesForCourse(c)
+);
+
 export default function App() {
   // --- CORE STATE WITH ZERO INITIAL VALUES (NO INVENTED DATA) ---
   const [darkMode, setDarkMode] = useState<boolean>(() => {
-    const saved = localStorage.getItem('clotfocus_dark_v3');
+    const saved = localStorage.getItem('clotfocus_dark_v4');
     return saved ? JSON.parse(saved) : false;
   });
 
@@ -63,36 +73,47 @@ export default function App() {
   const [selectedSubjectForCurriculum, setSelectedSubjectForCurriculum] = useState<string>('subj-bio');
 
   const [selectedWorld, setSelectedWorld] = useState<AnimeWorldId>(() => {
-    const saved = localStorage.getItem('clotfocus_world_v3');
+    const saved = localStorage.getItem('clotfocus_world_v4');
     if (saved && (saved === 'NARUTO' || saved === 'HEROES' || saved === 'PIRATES' || saved === 'ALCHEMIST')) {
       return saved as AnimeWorldId;
     }
     return 'NARUTO';
   });
 
-  // Mother / Parent Authentication & Controls
+  // Mother / Parent Authentication & Controls (Always a valid object, never null)
   const [parentCredentials, setParentCredentials] = useState<{
     username: string;
-    password: string;
-  } | null>(() => {
-    const saved = localStorage.getItem('clotfocus_parent_creds_v3');
-    return saved ? JSON.parse(saved) : null;
+    passwordHash: string;
+    isConfigured: boolean;
+  }>(() => {
+    try {
+      const saved = localStorage.getItem('clotfocus_parent_creds_v4');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed.isConfigured === 'boolean') {
+          return parsed;
+        }
+      }
+    } catch {
+      // Fallback to unconfigured default
+    }
+    return { username: '', passwordHash: '', isConfigured: false };
   });
   const [isParentAuthenticated, setIsParentAuthenticated] = useState<boolean>(false);
 
   // Parental multiplier X: Duración Minijuego = X * Tiempo de Estudio (Starts at 0 until parent configures it)
   const [studyRatioX, setStudyRatioX] = useState<number>(() => {
-    const saved = localStorage.getItem('clotfocus_ratio_x_v3');
+    const saved = localStorage.getItem('clotfocus_ratio_x_v4');
     return saved !== null ? Number(saved) : 0;
   });
 
   const [distractionFreeMode, setDistractionFreeMode] = useState<boolean>(() => {
-    const saved = localStorage.getItem('clotfocus_distraction_v3');
+    const saved = localStorage.getItem('clotfocus_distraction_v4');
     return saved ? JSON.parse(saved) : false;
   });
 
   const [focusLockMode, setFocusLockMode] = useState<boolean>(() => {
-    const saved = localStorage.getItem('clotfocus_focuslock_v3');
+    const saved = localStorage.getItem('clotfocus_focuslock_v4');
     return saved ? JSON.parse(saved) : false;
   });
 
@@ -100,69 +121,69 @@ export default function App() {
 
   // Study Points (Puntos de Estudio) starts strictly at 0
   const [studyPoints, setStudyPoints] = useState<number>(() => {
-    const saved = localStorage.getItem('clotfocus_study_points_v3');
+    const saved = localStorage.getItem('clotfocus_study_points_v4');
     return saved !== null ? Number(saved) : 0;
   });
 
   // Break Minutes (Minutos de Minijuego) starts strictly at 0
   const [breakMinutes, setBreakMinutes] = useState<number>(() => {
-    const saved = localStorage.getItem('clotfocus_break_min_v3');
+    const saved = localStorage.getItem('clotfocus_break_min_v4');
     return saved !== null ? Number(saved) : 0;
   });
 
   // Completed units & lessons map starts empty {}
   const [completedUnits, setCompletedUnits] = useState<Record<string, boolean>>(() => {
-    const saved = localStorage.getItem('clotfocus_completed_units_v3');
+    const saved = localStorage.getItem('clotfocus_completed_units_v4');
     return saved ? JSON.parse(saved) : {};
   });
 
   // Tasks start empty []
   const [tasks, setTasks] = useState<SchoolTask[]>(() => {
-    const saved = localStorage.getItem('clotfocus_tasks_v3');
+    const saved = localStorage.getItem('clotfocus_tasks_v4');
     return saved ? JSON.parse(saved) : INITIAL_TASKS;
   });
 
   // Virtual shop items start locked
   const [shopItems, setShopItems] = useState<VirtualShopItem[]>(() => {
-    const saved = localStorage.getItem('clotfocus_shop_v3');
+    const saved = localStorage.getItem('clotfocus_shop_v4');
     return saved ? JSON.parse(saved) : INITIAL_VIRTUAL_SHOP_ITEMS;
   });
 
   // Weekly focus metrics start at 0 across all days
   const [weeklyMetrics, setWeeklyMetrics] = useState<WeeklyStudyMetric[]>(() => {
-    const saved = localStorage.getItem('clotfocus_weekly_v3');
+    const saved = localStorage.getItem('clotfocus_weekly_v4');
     return saved ? JSON.parse(saved) : INITIAL_WEEKLY_STUDY_METRICS;
   });
 
-  // Subject grades start at null (sin calificar) across all subjects
+  // Subject grades start at null (sin calificar) across all courses and subjects
   const [subjectGrades, setSubjectGrades] = useState<SubjectGradeMetric[]>(() => {
-    const saved = localStorage.getItem('clotfocus_grades_v3');
-    return saved ? JSON.parse(saved) : INITIAL_SUBJECT_GRADES_METRICS;
+    const saved = localStorage.getItem('clotfocus_grades_v4');
+    return saved ? JSON.parse(saved) : ALL_INITIAL_GRADES;
   });
 
   // Platforms start disconnected (connected: false)
   const [platforms, setPlatforms] = useState<SchoolPlatformSync[]>(() => {
-    const saved = localStorage.getItem('clotfocus_platforms_v3');
+    const saved = localStorage.getItem('clotfocus_platforms_v4');
     return saved ? JSON.parse(saved) : INITIAL_PLATFORMS;
   });
 
   const [parentRewards, setParentRewards] = useState<ParentHomeReward[]>(() => {
-    const saved = localStorage.getItem('clotfocus_parent_rewards_v3');
+    const saved = localStorage.getItem('clotfocus_parent_rewards_v4');
     return saved ? JSON.parse(saved) : INITIAL_PARENT_REWARDS;
   });
 
   const [flashcards, setFlashcards] = useState<FlashcardItem[]>(() => {
-    const saved = localStorage.getItem('clotfocus_flashcards_v3');
-    return saved ? JSON.parse(saved) : INITIAL_FLASHCARDS;
+    const saved = localStorage.getItem('clotfocus_flashcards_v4');
+    return saved ? JSON.parse(saved) : ALL_INITIAL_FLASHCARDS;
   });
 
   const [cornellNotes, setCornellNotes] = useState<CornellNote[]>(() => {
-    const saved = localStorage.getItem('clotfocus_cornell_v3');
+    const saved = localStorage.getItem('clotfocus_cornell_v4');
     return saved ? JSON.parse(saved) : INITIAL_CORNELL_NOTES;
   });
 
   const [teacherAdaptations, setTeacherAdaptations] = useState<TeacherAdaptationGuide[]>(() => {
-    const saved = localStorage.getItem('clotfocus_adaptations_v3');
+    const saved = localStorage.getItem('clotfocus_adaptations_v4');
     return saved ? JSON.parse(saved) : TEACHER_ADAPTATIONS;
   });
 
@@ -170,11 +191,14 @@ export default function App() {
   const [showNotificationPanel, setShowNotificationPanel] = useState<boolean>(false);
   const [pushPermissionStatus, setPushPermissionStatus] = useState<string>('ACTIVO');
 
+  // Dynamic subjects for the currently selected course (1º ESO .. 2º Bach)
+  const currentCourseSubjects = getSubjectsForCourse(selectedCourse);
+
   // --- PLANNER / NEW TASK FORM STATE ---
   const [taskFilter, setTaskFilter] = useState<'PENDING' | 'COMPLETED' | 'ALL'>('ALL');
   const [showAddTaskModal, setShowAddTaskModal] = useState<boolean>(false);
   const [newTaskTitle, setNewTaskTitle] = useState<string>('');
-  const [newTaskSubject, setNewTaskSubject] = useState<string>('Biología y Geología');
+  const [newTaskSubject, setNewTaskSubject] = useState<string>(currentCourseSubjects[0].name);
   const [newTaskDueDate, setNewTaskDueDate] = useState<string>('Próxima entrega');
   const [newTaskStep1, setNewTaskStep1] = useState<string>('');
   const [newTaskStep2, setNewTaskStep2] = useState<string>('');
@@ -184,7 +208,7 @@ export default function App() {
 
   // --- PERSISTENCE EFFECTS ---
   useEffect(() => {
-    localStorage.setItem('clotfocus_dark_v3', JSON.stringify(darkMode));
+    localStorage.setItem('clotfocus_dark_v4', JSON.stringify(darkMode));
     if (darkMode) {
       document.documentElement.classList.add('dark');
     } else {
@@ -193,75 +217,71 @@ export default function App() {
   }, [darkMode]);
 
   useEffect(() => {
-    localStorage.setItem('clotfocus_world_v3', selectedWorld);
+    localStorage.setItem('clotfocus_world_v4', selectedWorld);
   }, [selectedWorld]);
 
   useEffect(() => {
-    if (parentCredentials) {
-      localStorage.setItem('clotfocus_parent_creds_v3', JSON.stringify(parentCredentials));
-    } else {
-      localStorage.removeItem('clotfocus_parent_creds_v3');
-    }
+    localStorage.setItem('clotfocus_parent_creds_v4', JSON.stringify(parentCredentials));
   }, [parentCredentials]);
 
   useEffect(() => {
-    localStorage.setItem('clotfocus_ratio_x_v3', String(studyRatioX));
+    localStorage.setItem('clotfocus_ratio_x_v4', String(studyRatioX));
   }, [studyRatioX]);
 
   useEffect(() => {
-    localStorage.setItem('clotfocus_distraction_v3', JSON.stringify(distractionFreeMode));
+    localStorage.setItem('clotfocus_distraction_v4', JSON.stringify(distractionFreeMode));
   }, [distractionFreeMode]);
 
   useEffect(() => {
-    localStorage.setItem('clotfocus_focuslock_v3', JSON.stringify(focusLockMode));
+    localStorage.setItem('clotfocus_focuslock_v4', JSON.stringify(focusLockMode));
   }, [focusLockMode]);
 
   useEffect(() => {
-    localStorage.setItem('clotfocus_study_points_v3', String(studyPoints));
+    localStorage.setItem('clotfocus_study_points_v4', String(studyPoints));
   }, [studyPoints]);
 
   useEffect(() => {
-    localStorage.setItem('clotfocus_break_min_v3', String(breakMinutes));
+    localStorage.setItem('clotfocus_break_min_v4', String(breakMinutes));
   }, [breakMinutes]);
 
   useEffect(() => {
-    localStorage.setItem('clotfocus_completed_units_v3', JSON.stringify(completedUnits));
+    localStorage.setItem('clotfocus_completed_units_v4', JSON.stringify(completedUnits));
   }, [completedUnits]);
 
   useEffect(() => {
-    localStorage.setItem('clotfocus_tasks_v3', JSON.stringify(tasks));
+    localStorage.setItem('clotfocus_tasks_v4', JSON.stringify(tasks));
   }, [tasks]);
 
   useEffect(() => {
-    localStorage.setItem('clotfocus_shop_v3', JSON.stringify(shopItems));
+    localStorage.setItem('clotfocus_shop_v4', JSON.stringify(shopItems));
   }, [shopItems]);
 
   useEffect(() => {
-    localStorage.setItem('clotfocus_weekly_v3', JSON.stringify(weeklyMetrics));
+    localStorage.setItem('clotfocus_weekly_v4', JSON.stringify(weeklyMetrics));
   }, [weeklyMetrics]);
 
   useEffect(() => {
-    localStorage.setItem('clotfocus_grades_v3', JSON.stringify(subjectGrades));
+    localStorage.setItem('clotfocus_grades_v4', JSON.stringify(subjectGrades));
   }, [subjectGrades]);
 
   useEffect(() => {
-    localStorage.setItem('clotfocus_platforms_v3', JSON.stringify(platforms));
+    localStorage.setItem('clotfocus_platforms_v4', JSON.stringify(platforms));
   }, [platforms]);
 
   useEffect(() => {
-    localStorage.setItem('clotfocus_parent_rewards_v3', JSON.stringify(parentRewards));
+    localStorage.setItem('clotfocus_parent_rewards_v4', JSON.stringify(parentRewards));
   }, [parentRewards]);
 
   useEffect(() => {
-    localStorage.setItem('clotfocus_flashcards_v3', JSON.stringify(flashcards));
+    localStorage.setItem('clotfocus_flashcards_v4', JSON.stringify(flashcards));
   }, [flashcards]);
 
   useEffect(() => {
-    localStorage.setItem('clotfocus_cornell_v3', JSON.stringify(cornellNotes));
+    localStorage.setItem('clotfocus_cornell_v4', JSON.stringify(cornellNotes));
   }, [cornellNotes]);
 
   useEffect(() => {
-    localStorage.setItem('clotfocus_adaptations_v3', JSON.stringify(teacherAdaptations));
+    localStorage.setItem('clotfocus_adaptations_v4', JSON.stringify(teacherAdaptations));
   }, [teacherAdaptations]);
 
   const triggerToast = (message: string) => {
@@ -269,6 +289,18 @@ export default function App() {
     window.setTimeout(() => {
       setToastBanner((prev) => (prev === message ? null : prev));
     }, 5000);
+  };
+
+  const handleSelectCourse = (grade: CourseGrade) => {
+    setSelectedCourse(grade);
+    const nextSubjects = getSubjectsForCourse(grade);
+    if (nextSubjects.length > 0) {
+      setSelectedSubjectForCurriculum(nextSubjects[0].id);
+      setNewTaskSubject(nextSubjects[0].name);
+    }
+    triggerToast(
+      `Curso cambiado a ${COURSE_METADATA[grade].label}: ${nextSubjects.length} asignaturas, temarios, tarjetas y boletín actualizados.`
+    );
   };
 
   // Helper to record real study minutes into today's bar in weeklyMetrics
@@ -418,11 +450,7 @@ export default function App() {
     triggerToast('Alerta de recordatorio Push enviada y registrada en el calendario.');
   };
 
-  const handleConnectPlatformWithCredentials = (
-    platformId: string,
-    username: string,
-    _password: string
-  ) => {
+  const handleConnectPlatformWithCredentials = (platformId: string, username: string) => {
     setPlatforms((prev) =>
       prev.map((p) =>
         p.id === platformId
@@ -466,10 +494,10 @@ export default function App() {
     setTasks([]);
     setShopItems(INITIAL_VIRTUAL_SHOP_ITEMS);
     setWeeklyMetrics(INITIAL_WEEKLY_STUDY_METRICS);
-    setSubjectGrades(INITIAL_SUBJECT_GRADES_METRICS);
+    setSubjectGrades(ALL_INITIAL_GRADES);
     setPlatforms(INITIAL_PLATFORMS);
     setParentRewards([]);
-    setFlashcards(INITIAL_FLASHCARDS);
+    setFlashcards(ALL_INITIAL_FLASHCARDS);
     setCornellNotes([]);
     setNotifications([]);
     setTeacherAdaptations(TEACHER_ADAPTATIONS);
@@ -513,20 +541,21 @@ export default function App() {
       <div className="min-h-screen bg-[#FDFBF7] dark:bg-stone-950 text-stone-900 dark:text-stone-100 transition-colors">
         {/* =====================================================================
             TOP BAR CONTRACT: Strictly 3 Zones separated by gap-8
-            Zone 1: Single text wordmark | Zone 2: 5 single-line nav links | Zone 3: 1 primary CTA
+            Zone 1: Single brand wordmark | Zone 2: 5 single-line nav links | Zone 3: 1 primary CTA
             ===================================================================== */}
         <header className="sticky top-0 z-30 bg-[#FDFBF7]/95 dark:bg-stone-900/95 backdrop-blur-xs border-b border-stone-200 dark:border-stone-800">
           <div className="max-w-7xl mx-auto flex items-center justify-between gap-8 px-6 py-4">
-            {/* Zone 1: Brand Title, single text element */}
+            {/* Zone 1: Brand Title */}
             <a
               href="#panel"
               onClick={(e) => {
                 e.preventDefault();
                 setActiveTab('dashboard');
               }}
-              className="text-xl font-bold tracking-tight text-stone-900 dark:text-white whitespace-nowrap shrink-0 font-display"
+              className="flex items-center gap-2.5 text-xl font-bold tracking-tight text-stone-900 dark:text-white whitespace-nowrap shrink-0 font-display"
             >
-              ClotFocus
+              <img src="/favicon.svg" alt="" className="w-7 h-7 shrink-0" />
+              <span>ClotFocus</span>
             </a>
 
             {/* Zone 2: 5 concise single-line navigation links */}
@@ -540,7 +569,7 @@ export default function App() {
                     : 'border-transparent hover:text-stone-900 dark:hover:text-white'
                 }`}
               >
-                Panel
+                Panel ({courseMeta.shortLabel})
               </button>
               <button
                 type="button"
@@ -551,7 +580,7 @@ export default function App() {
                     : 'border-transparent hover:text-stone-900 dark:hover:text-white'
                 }`}
               >
-                Temarios ({FULL_SYLLABUS_SUBJECTS.length} Asignaturas)
+                Temarios ({currentCourseSubjects.length} Asignaturas)
               </button>
               <button
                 type="button"
@@ -619,25 +648,23 @@ export default function App() {
               {/* Left: IES Clot del Moro Course Level Selector */}
               <div className="flex flex-wrap items-center gap-3">
                 <span className="text-xs font-medium text-stone-700 dark:text-stone-300">
-                  IES Clot del Moro (Algímia d'Alfara) · Curso:
+                  IES Clot del Moro (Algímia d'Alfara) · Selecciona Curso:
                 </span>
                 <div className="flex items-center gap-1 p-1 bg-white dark:bg-stone-800 rounded-lg border border-stone-200 dark:border-stone-700">
-                  {(['1ESO', '2ESO', '3ESO', '4ESO', '1BACH', '2BACH'] as CourseGrade[]).map(
-                    (grade) => (
-                      <button
-                        key={grade}
-                        type="button"
-                        onClick={() => setSelectedCourse(grade)}
-                        className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-colors whitespace-nowrap shrink-0 ${
-                          selectedCourse === grade
-                            ? 'bg-amber-600 text-white'
-                            : 'text-stone-600 dark:text-stone-300 hover:text-stone-900 dark:hover:text-white'
-                        }`}
-                      >
-                        {COURSE_METADATA[grade].shortLabel}
-                      </button>
-                    )
-                  )}
+                  {ALL_COURSES.map((grade) => (
+                    <button
+                      key={grade}
+                      type="button"
+                      onClick={() => handleSelectCourse(grade)}
+                      className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-colors whitespace-nowrap shrink-0 ${
+                        selectedCourse === grade
+                          ? 'bg-amber-600 text-white'
+                          : 'text-stone-600 dark:text-stone-300 hover:text-stone-900 dark:hover:text-white'
+                      }`}
+                    >
+                      {COURSE_METADATA[grade].shortLabel}
+                    </button>
+                  ))}
                 </div>
               </div>
 
@@ -753,8 +780,8 @@ export default function App() {
         {/* Mobile Navigation Strip */}
         <div className="md:hidden flex items-center gap-2 overflow-x-auto px-6 py-2.5 border-b border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900">
           {[
-            { id: 'dashboard', label: 'Panel' },
-            { id: 'curriculum', label: `Temarios (${FULL_SYLLABUS_SUBJECTS.length})` },
+            { id: 'dashboard', label: `Panel (${courseMeta.shortLabel})` },
+            { id: 'curriculum', label: `Temarios (${currentCourseSubjects.length})` },
             { id: 'planner', label: 'Tareas y Estudio' },
             { id: 'minigames', label: focusLockMode ? '🔒 Minijuegos' : 'Tienda y Minijuegos' },
             { id: 'analytics', label: 'Madre/Padre y LMS' },
@@ -861,10 +888,10 @@ export default function App() {
             MAIN CONTENT VIEWPORT
             ===================================================================== */}
         <main className="max-w-7xl mx-auto px-6 py-8 space-y-10">
-          {/* TAB 1: DASHBOARD (PANEL PRINCIPAL CON TODAS LAS ASIGNATURAS VISIBLES) */}
+          {/* TAB 1: DASHBOARD (PANEL PRINCIPAL CON TODAS LAS ASIGNATURAS DEL CURSO SELECCIONADO) */}
           {activeTab === 'dashboard' && (
             <div className="space-y-10">
-              {/* ALL SUBJECTS DIRECTORY FIRST SO ALL SUBJECTS ARE VISIBLE AT A GLANCE */}
+              {/* ALL SUBJECTS DIRECTORY FIRST SO ALL SUBJECTS OF THE ACTIVE COURSE ARE VISIBLE */}
               <section className="border border-stone-200 dark:border-stone-800 rounded-xl bg-white dark:bg-stone-900 p-6 space-y-6">
                 <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 pb-4 border-b border-stone-200 dark:border-stone-800">
                   <div>
@@ -873,13 +900,13 @@ export default function App() {
                       <span aria-hidden="true"> · </span>
                       <span>{courseMeta.stage}</span>
                       <span aria-hidden="true"> · </span>
-                      <span>Estilo Repaso ESO / Bachillerato</span>
+                      <span>Reto del curso: {courseMeta.keyChallenge}</span>
                     </div>
                     <h1 className="text-2xl sm:text-3xl font-bold text-stone-900 dark:text-white tracking-tight mt-1">
-                      Todas las Asignaturas de {courseMeta.label} ({FULL_SYLLABUS_SUBJECTS.length} Materias)
+                      Asignaturas y Temarios de {courseMeta.label} ({currentCourseSubjects.length} Materias)
                     </h1>
                     <p className="text-xs sm:text-sm text-stone-600 dark:text-stone-300 mt-1">
-                      Haz clic en cualquier asignatura para abrir su temario completo por unidades, resúmenes claros para TDAH y test de autoevaluación. Todos los contadores parten de <strong>0</strong>.
+                      Haz clic en cualquier asignatura de <strong>{courseMeta.label}</strong> para abrir sus unidades, esquemas visuales TDAH y test de autoevaluación. Si cambias de curso arriba (1º ESO a 2º Bach), cambian automáticamente todas las asignaturas y unidades.
                     </p>
                   </div>
 
@@ -889,7 +916,7 @@ export default function App() {
                       onClick={() => setActiveTab('curriculum')}
                       className="px-4 py-2.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold transition-colors whitespace-nowrap shrink-0"
                     >
-                      Ver Todos los Temarios →
+                      Ver Temarios de {courseMeta.shortLabel} →
                     </button>
                     <button
                       type="button"
@@ -904,9 +931,9 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* All-Subjects Grid (Every subject visible simultaneously) */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5">
-                  {FULL_SYLLABUS_SUBJECTS.map((subject) => {
+                {/* Course-Specific Subjects Grid */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {currentCourseSubjects.map((subject) => {
                     const doneInSubject = subject.units.filter((u) => completedUnits[u.id]).length;
                     return (
                       <button
@@ -921,7 +948,7 @@ export default function App() {
                         <div className="space-y-1.5">
                           <div className="flex items-center justify-between gap-2 text-xs text-stone-500 dark:text-stone-400">
                             <span className="font-mono font-semibold text-amber-700 dark:text-amber-400">
-                              {subject.shortCode}
+                              [{subject.shortCode}] · {courseMeta.shortLabel}
                             </span>
                             <span className="font-mono tabular-nums">
                               {doneInSubject}/{subject.units.length} uds
@@ -938,7 +965,7 @@ export default function App() {
                         <div className="pt-2 border-t border-stone-200/70 dark:border-stone-700/60 flex items-center justify-between text-xs">
                           <span className="text-stone-600 dark:text-stone-300 font-medium flex items-center gap-1">
                             <BookOpen className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
-                            Abrir temario
+                            Abrir {subject.units.length} unidades de {courseMeta.shortLabel}
                           </span>
                           <span className="font-mono text-stone-400">→</span>
                         </div>
@@ -956,11 +983,11 @@ export default function App() {
                     <div className="text-xs text-stone-500 dark:text-stone-400">
                       <span>Estado Inicial a Cero (Sin datos inventados)</span>
                       <span aria-hidden="true"> · </span>
-                      <span>Control Parental con Contraseña</span>
+                      <span>Bloque Pomodoro Recomendado en {courseMeta.shortLabel}: {courseMeta.recommendedFocusMin} min</span>
                     </div>
 
                     <h2 className="text-xl sm:text-2xl font-bold text-stone-900 dark:text-white tracking-tight">
-                      Tu Progreso Real en el IES Clot del Moro
+                      Tu Progreso Real en {courseMeta.label} · IES Clot del Moro
                     </h2>
 
                     <p className="text-sm text-stone-600 dark:text-stone-300 leading-relaxed">
@@ -972,10 +999,10 @@ export default function App() {
                   {displayedTasks.length === 0 ? (
                     <div className="p-5 rounded-xl bg-stone-50 dark:bg-stone-800/50 border border-stone-200 dark:border-stone-800 space-y-2">
                       <div className="text-xs font-mono text-stone-500 dark:text-stone-400">
-                        AGENDA DE TAREAS EN 0 · SIN ENTREGAS CARGADAS
+                        AGENDA DE {courseMeta.shortLabel} EN 0 · SIN ENTREGAS CARGADAS
                       </div>
                       <h3 className="text-sm font-bold text-stone-900 dark:text-white">
-                        No hay tareas pendientes registradas todavía
+                        No hay tareas pendientes registradas en {courseMeta.label}
                       </h3>
                       <p className="text-xs text-stone-600 dark:text-stone-300">
                         Puedes añadir tus propias tareas divididas en micro-pasos en la pestaña <strong>Tareas y Estudio</strong> o iniciar sesión con tu usuario y contraseña de <strong>Aules GVA, Ítaca Web Familia o Google Classroom</strong>.
@@ -985,7 +1012,7 @@ export default function App() {
                     <div className="p-5 rounded-xl bg-stone-50 dark:bg-stone-800/60 border border-stone-200 dark:border-stone-700/80 space-y-3">
                       <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-stone-500 dark:text-stone-400">
                         <span>
-                          PRÓXIMA TAREA · {displayedTasks[0].subject} · Entrega: {displayedTasks[0].dueDate}
+                          PRÓXIMA TAREA ({courseMeta.shortLabel}) · {displayedTasks[0].subject} · Entrega: {displayedTasks[0].dueDate}
                         </span>
                         <span className="font-mono tabular-nums text-amber-700 dark:text-amber-400 font-semibold">
                           {displayedTasks[0].sourcePlatform}
@@ -1004,21 +1031,21 @@ export default function App() {
                       onClick={() => setActiveTab('curriculum')}
                       className="px-5 py-2.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold transition-colors whitespace-nowrap shrink-0"
                     >
-                      Ir a Temarios de las {FULL_SYLLABUS_SUBJECTS.length} Asignaturas
+                      Ir a Temarios de {courseMeta.shortLabel} ({currentCourseSubjects.length} Asignaturas)
                     </button>
                     <button
                       type="button"
                       onClick={() => setActiveTab('planner')}
                       className="px-4 py-2.5 rounded-lg border border-stone-300 dark:border-stone-700 text-stone-700 dark:text-stone-200 hover:bg-stone-100 dark:hover:bg-stone-800 text-xs font-semibold transition-colors whitespace-nowrap shrink-0"
                     >
-                      Añadir Tarea o Usar Pomodoro
+                      Añadir Tarea o Usar Pomodoro ({courseMeta.recommendedFocusMin} min)
                     </button>
                     <button
                       type="button"
                       onClick={() => setActiveTab('analytics')}
                       className="px-4 py-2.5 rounded-lg border border-stone-300 dark:border-stone-700 text-stone-700 dark:text-stone-200 hover:bg-stone-100 dark:hover:bg-stone-800 text-xs font-semibold transition-colors whitespace-nowrap shrink-0"
                     >
-                      Conectar Aules / Ítaca / Classroom
+                      Acceso Madre / Padre y LMS
                     </button>
                   </div>
                 </div>
@@ -1128,20 +1155,20 @@ export default function App() {
 
                 <div className="p-5 rounded-xl border border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900">
                   <p className="text-xs text-stone-500 dark:text-stone-400">
-                    Asignaturas Disponibles ({courseMeta.shortLabel})
+                    Asignaturas Activas ({courseMeta.shortLabel})
                   </p>
                   <div className="text-2xl font-bold font-mono tabular-nums text-stone-900 dark:text-white mt-1">
-                    {FULL_SYLLABUS_SUBJECTS.length} Materias
+                    {currentCourseSubjects.length} Materias
                   </div>
                   <p className="text-xs text-emerald-700 dark:text-emerald-400 mt-1">
-                    Todas las asignaturas del curso visibles
+                    Temario específico de {courseMeta.label}
                   </p>
                 </div>
               </div>
             </div>
           )}
 
-          {/* TAB 2: TEMARIOS COMPLETOS DE TODAS LAS ASIGNATURAS Y MÓDULO INTERACTIVO */}
+          {/* TAB 2: TEMARIOS COMPLETOS DE TODAS LAS ASIGNATURAS DEL CURSO SELECCIONADO */}
           {activeTab === 'curriculum' && (
             <CurriculumAndModules
               selectedCourse={selectedCourse}
@@ -1237,7 +1264,7 @@ export default function App() {
                         onChange={(e) => setNewTaskSubject(e.target.value)}
                         className="px-3 py-2 text-xs rounded-lg border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-900 dark:text-white"
                       >
-                        {FULL_SYLLABUS_SUBJECTS.map((subj) => (
+                        {currentCourseSubjects.map((subj) => (
                           <option key={subj.id} value={subj.name}>
                             {subj.name}
                           </option>
@@ -1475,16 +1502,20 @@ export default function App() {
               parentCredentials={parentCredentials}
               isParentAuthenticated={isParentAuthenticated}
               onConfigureParentCredentials={(username, password) => {
-                setParentCredentials({ username, password });
+                setParentCredentials({
+                  username,
+                  passwordHash: password,
+                  isConfigured: true,
+                });
                 setIsParentAuthenticated(true);
                 soundFX.playStepComplete();
                 triggerToast(`Cuenta parental creada para "${username}". Sesión iniciada.`);
               }}
               onLoginParent={(username, password) => {
                 if (
-                  parentCredentials &&
+                  parentCredentials.isConfigured &&
                   parentCredentials.username.toLowerCase() === username.toLowerCase() &&
-                  parentCredentials.password === password
+                  parentCredentials.passwordHash === password
                 ) {
                   setIsParentAuthenticated(true);
                   soundFX.playStepComplete();
@@ -1506,28 +1537,29 @@ export default function App() {
                 );
               }}
               distractionFreeMode={distractionFreeMode}
-              onToggleDistractionFree={() => {
+              onToggleDistractionFree={(val) => {
                 if (!isParentAuthenticated) return;
-                setDistractionFreeMode((prev) => !prev);
+                setDistractionFreeMode(val);
                 triggerToast('Modo Sin Distracciones actualizado por Madre/Padre.');
               }}
               focusLockMode={focusLockMode}
-              onToggleFocusLockMode={() => {
+              onToggleFocusLockMode={(val) => {
                 if (!isParentAuthenticated) return;
-                setFocusLockMode((prev) => !prev);
+                setFocusLockMode(val);
                 triggerToast('Modo Enfoque (bloqueo de minijuegos) actualizado por Madre/Padre.');
               }}
               weeklyMetrics={weeklyMetrics}
               subjectGrades={subjectGrades}
-              onUpdateSubjectGrade={(subjectName, eval1, eval2, currentEval) => {
+              onUpdateSubjectGrade={(subjectName, eval1, eval2, currentEval, comment) => {
                 setSubjectGrades((prev) =>
                   prev.map((sg) => {
-                    if (sg.subject !== subjectName) return sg;
+                    if (sg.subject !== subjectName || sg.course !== selectedCourse) return sg;
                     return {
                       ...sg,
                       eval1,
                       eval2,
                       currentEval,
+                      teacherComment: comment,
                       tasksCompleted:
                         (eval1 !== null ? 1 : 0) +
                         (eval2 !== null ? 1 : 0) +
@@ -1586,7 +1618,7 @@ export default function App() {
               ClotFocus · Programa de Inclusión y Apoyo al Alumnado con TDAH (1º ESO a 2º Bachillerato) · IES Clot del Moro, Algímia d'Alfara
             </span>
             <span>
-              10 Asignaturas Completas · Control Parental con Contraseña · Listo para GitHub y Vercel
+              Temarios por Curso (1º ESO a 2º Bach) · Control Parental con Contraseña · Listo para GitHub y Vercel
             </span>
           </div>
         </footer>

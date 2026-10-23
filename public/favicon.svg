@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="100%" height="100%" fill="none">
+  <defs>
+    <linearGradient id="amberGrad" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#F59E0B" />
+      <stop offset="100%" stop-color="#D97706" />
+    </linearGradient>
+    <linearGradient id="emeraldGrad" x1="0" y1="64" x2="64" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#059669" />
+      <stop offset="100%" stop-color="#10B981" />
+    </linearGradient>
+  </defs>
+
+  <!-- Left Open Book Wing (Reaches X=1, Y=8..58) -->
+  <path
+    d="M32 16C23 9 11 7 1 10V52C11 49 23 51 32 58V16Z"
+    fill="url(#amberGrad)"
+    stroke="#78350F"
+    stroke-width="2"
+    stroke-linejoin="round"
+  />
+
+  <!-- Right Open Book Wing (Reaches X=63, Y=8..58) -->
+  <path
+    d="M32 16C41 9 53 7 63 10V52C53 49 41 51 32 58V16Z"
+    fill="url(#emeraldGrad)"
+    stroke="#064E3B"
+    stroke-width="2"
+    stroke-linejoin="round"
+  />
+
+  <!-- Dynamic Focus Star / Lightning Bolt Reaching Top (Y=1) to Bottom (Y=63) and Full Width -->
+  <path
+    d="M32 1L39.5 21.5L63 26L41.5 35.5L32 63L22.5 35.5L1 26L24.5 21.5L32 1Z"
+    fill="#FEF3C7"
+    stroke="#92400E"
+    stroke-width="2"
+    stroke-linejoin="round"
+  />
+
+  <!-- Inner Core Focus Diamond -->
+  <path
+    d="M32 11L36.5 25.5L51 28L36.5 32.5L32 49L27.5 32.5L13 28L27.5 25.5L32 11Z"
+    fill="#D97706"
+  />
+
+  <!-- Center Focus Pupil -->
+  <circle cx="32" cy="29" r="4.5" fill="#FFFBEB" />
+</svg>
